@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+
 
 ROM_MANIFEST_BRANCH="sixteen-qpr2"
 
