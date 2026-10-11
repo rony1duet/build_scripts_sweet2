@@ -30,9 +30,7 @@ echo "==========================================="
 echo "Setting up KernelSU-Next (sm6150)..."
 echo "==========================================="
 if [ -d "kernel/xiaomi/sm6150" ]; then
-    cd kernel/xiaomi/sm6150
-    curl -LSs "https://raw.githubusercontent.com/manipvlator/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main || echo "KernelSU already applied or skipped"
-    cd - >/dev/null
+    (cd kernel/xiaomi/sm6150 && curl -LSs "https://raw.githubusercontent.com/manipvlator/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main) || echo "KernelSU already applied or skipped"
 fi
 
 echo "==========================================="
