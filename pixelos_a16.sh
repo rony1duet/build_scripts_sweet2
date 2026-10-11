@@ -16,7 +16,7 @@ echo "==========================================="
 echo "Setting up local manifest..."
 echo "==========================================="
 rm -rf .repo/local_manifests/
-git clone https://github.com/rony1duet/manifest_sweet2.git .repo/local_manifests -b main --depth=1
+git clone https://github.com/rony1duet/manifest_sweet2.git .repo/local_manifests -b main
 
 echo "==========================================="
 echo "Syncing repositories on Crave..."
