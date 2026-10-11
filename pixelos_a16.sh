@@ -2,7 +2,6 @@
 set -euo pipefail
 
 ROM_MANIFEST_BRANCH="sixteen-qpr2"
-LOCAL_MANIFEST_URL="https://raw.githubusercontent.com/rony1duet/manifest_sweet2/main/sweet2.xml"
 
 echo "==========================================="
 echo "Initializing PixelOS ${ROM_MANIFEST_BRANCH}..."
@@ -17,9 +16,7 @@ echo "==========================================="
 echo "Setting up local manifest..."
 echo "==========================================="
 rm -rf .repo/local_manifests/
-mkdir -p .repo/local_manifests
-curl --fail --location --retry 3 "${LOCAL_MANIFEST_URL}" \
-    --output .repo/local_manifests/sweet2.xml
+git clone https://github.com/rony1duet/manifest_sweet2.git .repo/local_manifests -b main --depth=1
 
 echo "==========================================="
 echo "Syncing repositories on Crave..."
