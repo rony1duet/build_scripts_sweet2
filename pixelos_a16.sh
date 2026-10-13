@@ -47,6 +47,6 @@ echo "==========================================="
 echo "Starting PixelOS sweet2 build..."
 echo "==========================================="
 source build/envsetup.sh
-breakfast sweet2
+lunch pixelos_sweet2-userdebug
 m pixelos
 
