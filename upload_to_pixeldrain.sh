@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Pixeldrain upload script for Crave builds
-# Reads API key from PIXELDRAIN_API_KEY environment variable
+# WARNING: API key hardcoded - do not share this script publicly!
 
 set -e
+
+# Hardcoded API key
+PIXELDRAIN_API_KEY="026168ac-08ec-4bdb-9dde-99c7635200b0"
 
 # Colors for output
 RED='\033[0;31m'
@@ -21,13 +24,6 @@ log_warn() {
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
-
-# Check for API key
-if [ -z "$PIXELDRAIN_API_KEY" ]; then
-    log_error "PIXELDRAIN_API_KEY environment variable not set"
-    log_info "Set it in Crave secrets or export before running"
-    exit 1
-fi
 
 # Find the built ROM zip
 # PixelOS typically outputs to out/target/product/sweet2/
