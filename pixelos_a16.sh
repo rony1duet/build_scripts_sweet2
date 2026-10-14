@@ -16,7 +16,7 @@ echo "==========================================="
 echo "Setting up local manifest..."
 echo "==========================================="
 rm -rf .repo/local_manifests/
-git clone https://github.com/rony1duet/manifest_sweet2.git .repo/local_manifests -b main
+git clone https://github.com/rony1duet/manifest_sweet2.git .repo/local_manifests -b lineage-23.2
 
 echo "==========================================="
 echo "Syncing repositories on Crave..."
@@ -47,7 +47,7 @@ echo "==========================================="
 echo "Starting PixelOS sweet2 build..."
 echo "==========================================="
 source build/envsetup.sh
-breakfast sweet2
+lunch pixelos_sweet2-userdebug
 m pixelos
 
 echo "==========================================="

@@ -33,10 +33,10 @@ if [ ! -d "$ROM_DIR" ]; then
     exit 1
 fi
 
-# Find the latest PixelOS zip
-ROM_ZIP=$(ls -t "$ROM_DIR"/PixelOS_*.zip 2>/dev/null | head -1)
+# Find the latest ROM zip (try multiple patterns)
+ROM_ZIP=$(ls -t "$ROM_DIR"/PixelOS_*.zip "$ROM_DIR"/aosp_*.zip "$ROM_DIR"/*sweet2*.zip 2>/dev/null | head -1)
 if [ -z "$ROM_ZIP" ]; then
-    log_error "No PixelOS zip found in $ROM_DIR"
+    log_error "No ROM zip found in $ROM_DIR"
     ls -la "$ROM_DIR"
     exit 1
 fi
