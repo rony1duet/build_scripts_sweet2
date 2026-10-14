@@ -47,6 +47,11 @@ echo "==========================================="
 echo "Starting PixelOS sweet2 build..."
 echo "==========================================="
 source build/envsetup.sh
-breakfast sweet2
+lunch pixelos_sweet2-userdebug
 m pixelos
+
+echo "==========================================="
+echo "Build complete! Uploading to Pixeldrain..."
+echo "==========================================="
+bash build_scripts_sweet2/upload_to_pixeldrain.sh
 
