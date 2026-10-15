@@ -53,4 +53,5 @@ m pixelos
 echo "==========================================="
 echo "Build complete! Uploading to Pixeldrain..."
 echo "==========================================="
-bash build_scripts_sweet2/upload_to_pixeldrain.sh
+curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/upload_to_pixeldrain.sh -o /tmp/upload_to_pixeldrain.sh
+bash /tmp/upload_to_pixeldrain.sh

@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Pixeldrain upload script for Crave builds
-# WARNING: API key hardcoded - do not share this script publicly!
 
 set -e
 
-# Hardcoded API key
-PIXELDRAIN_API_KEY="026168ac-08ec-4bdb-9dde-99c7635200b0"
+# API key from environment variable
+if [ -z "$PIXELDRAIN_API_KEY" ]; then
+    echo "ERROR: PIXELDRAIN_API_KEY environment variable is not set"
+    echo "Usage: PIXELDRAIN_API_KEY=your_key_here $0"
+    exit 1
+fi
 
 # Colors for output
 RED='\033[0;31m'
