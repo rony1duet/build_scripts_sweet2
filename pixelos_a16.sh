@@ -1,14 +1,5 @@
 #!/usr/bin/env bash
 
-DO_CLEAN=false
-for arg in "$@"; do
-    case "$arg" in
-        --clean)
-            DO_CLEAN=true
-            ;;
-    esac
-done
-
 ROM_MANIFEST_BRANCH="sixteen-qpr2"
 
 echo "==========================================="
@@ -56,13 +47,6 @@ echo "Starting PixelOS sweet2 build..."
 echo "==========================================="
 source build/envsetup.sh
 breakfast sweet2
-
-if [ "$DO_CLEAN" = true ]; then
-    echo "==========================================="
-    echo "Cleaning before build (--clean)..."
-    echo "==========================================="
-    m clean
-fi
 
 m pixelos
 

@@ -53,7 +53,14 @@ UPLOAD_RESPONSE=$(curl -s -T "$ROM_ZIP" \
     -H "Accept: application/json")
 
 # Check if upload was successful
-FILE_ID=$(echo "$UPLOAD_RESPONSE" | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
+# Try jq first, fall back to grep
+if command -v jq >/dev/null 2>&1; then
+    FILE_ID=$(echo "$UPLOAD_RESPONSE" | jq -r '.id // empty')
+elif command -v python3 >/dev/null 2>&1; then
+    FILE_ID=$(echo "$UPLOAD_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''), end='')" 2>/dev/null)
+else
+    FILE_ID=$(echo "$UPLOAD_RESPONSE" | grep -oE '"id" *: *"[^"]*"' | head -1 | cut -d'"' -f4)
+fi
 
 if [ -z "$FILE_ID" ]; then
     log_error "Upload failed. Response:"
