@@ -29,11 +29,6 @@ if [ -d "kernel/xiaomi/sm6150" ]; then
     (cd kernel/xiaomi/sm6150 && curl -LSs "https://raw.githubusercontent.com/manipvlator/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main) || echo "KernelSU already applied or skipped"
 fi
 
-echo "==========================================="
-echo "Fetching GCam prebuilts & libs..."
-echo "==========================================="
-bash vendor/android_prebuilts_sweet2/gcam/fetch_gcam_prebuilt.sh \
-    vendor/GCam_sweet2/system/product/app/GoogleCameraEng
 
 echo "==========================================="
 echo "Exporting build environment variables..."
