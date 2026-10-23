@@ -17,6 +17,14 @@ echo "==========================================="
 rm -rf .repo/local_manifests/
 git clone https://github.com/rony1duet/manifest_sweet2.git .repo/local_manifests -b main
 
+# Clean unstaged modifications from prior builds that prevent clean repo sync
+for repo_dir in kernel/xiaomi/sm6150 device/xiaomi/sweet2 device/xiaomi/sm6150-common vendor/xiaomi/sweet2 vendor/xiaomi/sm6150-common hardware/xiaomi hardware/dolby; do
+    if [ -d "$repo_dir/.git" ]; then
+        git -C "$repo_dir" reset --hard HEAD 2>/dev/null || true
+        git -C "$repo_dir" clean -fdx 2>/dev/null || true
+    fi
+done
+
 echo "==========================================="
 echo "Syncing repositories on Crave..."
 echo "==========================================="
@@ -26,6 +34,7 @@ echo "==========================================="
 echo "Setting up KernelSU-Next (sm6150)..."
 echo "==========================================="
 if [ -d "kernel/xiaomi/sm6150" ]; then
+    rm -rf kernel/xiaomi/sm6150/KernelSU kernel/xiaomi/sm6150/drivers/kernelsu
     (cd kernel/xiaomi/sm6150 && curl -LSs "https://raw.githubusercontent.com/manipvlator/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main) || echo "KernelSU already applied or skipped"
 fi
 

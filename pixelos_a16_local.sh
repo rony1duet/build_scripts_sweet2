@@ -100,6 +100,7 @@ fi
 
 # ---------------- KernelSU-Next ----------------
 if [ -d "kernel/xiaomi/sm6150" ]; then
+  rm -rf kernel/xiaomi/sm6150/KernelSU kernel/xiaomi/sm6150/drivers/kernelsu
   (cd kernel/xiaomi/sm6150 && \
     curl -LSs "https://raw.githubusercontent.com/manipvlator/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main) \
     || echo "KernelSU already applied or skipped"
