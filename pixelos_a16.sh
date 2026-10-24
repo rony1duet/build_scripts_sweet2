@@ -18,6 +18,13 @@ rm -rf .repo/local_manifests/
 git clone https://github.com/rony1duet/manifest_sweet2.git .repo/local_manifests -b main
 
 # Clean unstaged modifications from prior builds that prevent clean repo sync
+git reset --hard HEAD 2>/dev/null || true
+git clean -fdx 2>/dev/null || true
+if [ -d ".repo/manifests" ]; then
+    git -C .repo/manifests reset --hard HEAD 2>/dev/null || true
+    git -C .repo/manifests clean -fdx 2>/dev/null || true
+fi
+
 repo forall -c "git reset --hard HEAD && git clean -fdx" 2>/dev/null || true
 for repo_dir in kernel/xiaomi/sm6150 device/xiaomi/sweet2 device/xiaomi/sm6150-common vendor/xiaomi/sweet2 vendor/xiaomi/sm6150-common hardware/xiaomi hardware/dolby; do
     if [ -d "$repo_dir/.git" ]; then
@@ -32,6 +39,55 @@ echo "==========================================="
 /opt/crave/resync.sh
 
 echo "==========================================="
+echo "Ensuring Git LFS toolchains and binaries..."
+echo "==========================================="
+if ! command -v git-lfs >/dev/null 2>&1; then
+    echo "git-lfs not found, installing..."
+    (sudo apt-get update && sudo apt-get install -y git-lfs) 2>/dev/null || true
+fi
+git lfs install 2>/dev/null || true
+
+# Pull Git LFS in prebuilt directories
+for dir in prebuilts/clang/host/linux-x86 prebuilts/rust; do
+    if [ -d "$dir" ]; then
+        echo "Pulling Git LFS in $dir..."
+        git -C "$dir" reset --hard HEAD 2>/dev/null || true
+        git -C "$dir" lfs pull 2>/dev/null || true
+    fi
+done
+repo forall -r "prebuilts/.*" -c "git lfs pull" 2>/dev/null || true
+
+# Diagnostic & healing check for Clang compiler
+echo "=== Checking Clang compiler ==="
+CLANG_DIR="prebuilts/clang/host/linux-x86"
+CLANG_BIN=$(find "${CLANG_DIR}" -type f -name "clang" 2>/dev/null | head -n 1)
+
+if [ -n "$CLANG_BIN" ]; then
+    echo "Inspecting $CLANG_BIN:"
+    ls -l "$CLANG_BIN"
+    file "$CLANG_BIN"
+    # If Clang is still an ASCII text pointer file, force re-sync with LFS
+    if file "$CLANG_BIN" | grep -q "ASCII text"; then
+        echo "Clang is a Git LFS pointer text file! Re-syncing ${CLANG_DIR} with LFS..."
+        rm -rf "${CLANG_DIR}"
+        repo sync -c -j4 --force-sync "${CLANG_DIR}"
+        (cd "${CLANG_DIR}" && git lfs pull) 2>/dev/null || true
+        CLANG_BIN=$(find "${CLANG_DIR}" -type f -name "clang" 2>/dev/null | head -n 1)
+    fi
+fi
+
+# Ensure all binaries in prebuilts are executable
+find prebuilts/ -type f -name "clang*" -exec chmod +x {} + 2>/dev/null || true
+find prebuilts/ -type f -name "lld*" -exec chmod +x {} + 2>/dev/null || true
+find prebuilts/ -type f -name "llvm-*" -exec chmod +x {} + 2>/dev/null || true
+
+if [ -n "$CLANG_BIN" ]; then
+    chmod +x "$CLANG_BIN"
+    "$CLANG_BIN" --version || echo "WARNING: Clang execution test returned non-zero"
+fi
+echo "==============================="
+
+echo "==========================================="
 echo "Ensuring UNIX line endings on policy files..."
 echo "==========================================="
 find device/ hardware/ vendor/ system/ -path "*/sepolicy/*" -type f -exec sed -i 's/\r$//' {} + 2>/dev/null || true
@@ -44,6 +100,10 @@ if [ -d "kernel/xiaomi/sm6150" ]; then
     (cd kernel/xiaomi/sm6150 && curl -LSs "https://raw.githubusercontent.com/manipvlator/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main) || echo "KernelSU already applied or skipped"
 fi
 
+# Clean up any partial intermediate objects from previous aborted runs
+rm -f out/soong/.intermediates/frameworks/base/core/jni/libandroid_runtime/*/obj/frameworks/base/core/jni/android_os_SELinux.o 2>/dev/null || true
+rm -f out/soong/.intermediates/system/sepolicy/tools/version_policy/*/obj/system/sepolicy/tools/version_policy.o 2>/dev/null || true
+rm -rf out/soong/.intermediates/hardware/qcom/wlan/legacy/qcwcn/wifi_hal 2>/dev/null || true
 
 echo "==========================================="
 echo "Exporting build environment variables..."
@@ -51,6 +111,9 @@ echo "==========================================="
 export BUILD_USERNAME=rony1duet
 export BUILD_HOSTNAME=crave
 export BUILD_BROKEN_MISSING_REQUIRED_MODULES=true
+
+echo "Disk space status:"
+df -h / /tmp 2>/dev/null || true
 
 echo "==========================================="
 echo "Starting PixelOS sweet2 build..."
