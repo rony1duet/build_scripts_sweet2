@@ -140,6 +140,9 @@ if [ "$(free_gb "${CACHE_MOUNT}")" -lt "${MIN_FREE_CACHE_GB}" ]; then
 fi
 echo "Free before build: sda2 $(free_gb .) GB | sdb2 $(free_gb "${CACHE_MOUNT}") GB"
 
+# Ensure all sepolicy files have UNIX line endings
+find device/ hardware/ vendor/ system/ -path "*/sepolicy/*" -type f -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+
 # ---------------- Build ----------------
 # envsetup.sh and breakfast are shell functions that may return non-zero
 # internally, so disable 'set -e' here and check results explicitly.

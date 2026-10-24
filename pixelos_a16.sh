@@ -18,6 +18,7 @@ rm -rf .repo/local_manifests/
 git clone https://github.com/rony1duet/manifest_sweet2.git .repo/local_manifests -b main
 
 # Clean unstaged modifications from prior builds that prevent clean repo sync
+repo forall -c "git reset --hard HEAD && git clean -fdx" 2>/dev/null || true
 for repo_dir in kernel/xiaomi/sm6150 device/xiaomi/sweet2 device/xiaomi/sm6150-common vendor/xiaomi/sweet2 vendor/xiaomi/sm6150-common hardware/xiaomi hardware/dolby; do
     if [ -d "$repo_dir/.git" ]; then
         git -C "$repo_dir" reset --hard HEAD 2>/dev/null || true
@@ -29,6 +30,11 @@ echo "==========================================="
 echo "Syncing repositories on Crave..."
 echo "==========================================="
 /opt/crave/resync.sh
+
+echo "==========================================="
+echo "Ensuring UNIX line endings on policy files..."
+echo "==========================================="
+find device/ hardware/ vendor/ system/ -path "*/sepolicy/*" -type f -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 
 echo "==========================================="
 echo "Setting up KernelSU-Next (sm6150)..."
