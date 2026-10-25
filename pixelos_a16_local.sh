@@ -98,12 +98,13 @@ if [ "${RUN_GC}" = true ]; then
   echo "Free space after cleanup: $(free_gb .) GB"
 fi
 
-# ---------------- KernelSU-Next ----------------
+# ---------------- KernelSU (Native sm6150) ----------------
 if [ -d "kernel/xiaomi/sm6150" ]; then
-  rm -rf kernel/xiaomi/sm6150/KernelSU kernel/xiaomi/sm6150/drivers/kernelsu
-  (cd kernel/xiaomi/sm6150 && \
-    curl -LSs "https://raw.githubusercontent.com/manipvlator/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main) \
-    || echo "KernelSU already applied or skipped"
+  rm -rf kernel/xiaomi/sm6150/KernelSU
+  if [ -L "kernel/xiaomi/sm6150/drivers/kernelsu" ]; then
+    rm -f kernel/xiaomi/sm6150/drivers/kernelsu
+  fi
+  git -C kernel/xiaomi/sm6150 checkout HEAD -- drivers/kernelsu drivers/Makefile drivers/Kconfig fs/ 2>/dev/null || true
 fi
 
 # ---------------- GCam prebuilts ----------------

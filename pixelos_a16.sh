@@ -93,14 +93,21 @@ echo "==========================================="
 find device/ hardware/ vendor/ system/ -path "*/sepolicy/*" -type f -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 
 echo "==========================================="
-echo "Setting up KernelSU-Next (sm6150)..."
+echo "Restoring native KernelSU in sm6150 kernel..."
 echo "==========================================="
 if [ -d "kernel/xiaomi/sm6150" ]; then
-    rm -rf kernel/xiaomi/sm6150/KernelSU kernel/xiaomi/sm6150/drivers/kernelsu
-    (cd kernel/xiaomi/sm6150 && curl -LSs "https://raw.githubusercontent.com/manipvlator/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main) || echo "KernelSU already applied or skipped"
+    rm -rf kernel/xiaomi/sm6150/KernelSU
+    if [ -L "kernel/xiaomi/sm6150/drivers/kernelsu" ]; then
+        rm -f kernel/xiaomi/sm6150/drivers/kernelsu
+    fi
+    git -C kernel/xiaomi/sm6150 checkout HEAD -- drivers/kernelsu drivers/Makefile drivers/Kconfig fs/ 2>/dev/null || true
+    git -C kernel/xiaomi/sm6150 status -s
 fi
 
-# Clean up any partial intermediate objects from previous aborted runs
+# Clean up partial intermediate objects from previous aborted runs
+rm -rf out/target/product/sweet2/obj/KERNEL_OBJ 2>/dev/null || true
+rm -rf out/target/product/sweet2/obj/PACKAGING/check_vintf_all_intermediates 2>/dev/null || true
+rm -f out/target/product/sweet2/vendor/etc/vintf/manifest.xml 2>/dev/null || true
 rm -f out/soong/.intermediates/frameworks/base/core/jni/libandroid_runtime/*/obj/frameworks/base/core/jni/android_os_SELinux.o 2>/dev/null || true
 rm -f out/soong/.intermediates/system/sepolicy/tools/version_policy/*/obj/system/sepolicy/tools/version_policy.o 2>/dev/null || true
 rm -rf out/soong/.intermediates/hardware/qcom/wlan/legacy/qcwcn/wifi_hal 2>/dev/null || true
