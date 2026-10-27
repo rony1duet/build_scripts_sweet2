@@ -44,3 +44,18 @@ Both `pixelos_a16.sh` and `pixelos_a17.sh` automate the entire build lifecycle w
 5. **KernelSU-Next & SusFS Preservation:** Preserves native kernel drivers for Multi-Manager KernelSU-Next (UAPI 6, v3.4.2 manager compatible) and SusFS v2.3.0.
 6. **Smart Intermediate Cleaning:** Removes partial intermediate objects (`KERNEL_OBJ`, `cameraserver`, `libcameraservice`, `check_vintf`, and debloated app targets) ensuring incremental builds compile updated camera and kernel modules cleanly without requiring a full multi-hour workspace wipe.
 7. **Cloud Upload:** Automatically packages build artifacts and uploads the resulting flashable ROM zip directly to Pixeldrain upon successful completion.
+
+---
+
+## Automated Script Capabilities
+
+Both `pixelos_a16.sh` and `pixelos_a17.sh` automate the entire build lifecycle with built-in self-healing routines:
+
+1. **Manifest Setup:** Automatically clones and configures the appropriate local manifest branch (`PixelOS-16-QPR2` or `PixelOS-17-base`) from [`rony1duet/manifest_sweet2`](https://github.com/rony1duet/manifest_sweet2).
+2. **Repository Sync:** Resets unstaged build modifications and pulls Git LFS objects for toolchains (`prebuilts/clang`, `prebuilts/rust`).
+3. **Clang Pointer Verification:** Inspects Clang compiler binaries. If Git LFS pointer files are detected instead of real binaries, the script automatically triggers force-resync and LFS pull before invoking the build.
+4. **Policy Normalization:** Strips Windows CRLF line endings from all `sepolicy` files across device, hardware, vendor, and system directories to prevent policy compiler syntax errors.
+5. **KernelSU-Next & SusFS Preservation:** Preserves native kernel drivers for Multi-Manager KernelSU-Next (UAPI 6, v3.4.2 manager compatible) and SusFS v2.3.0.
+6. **Smart Intermediate Cleaning:** Removes partial intermediate objects (`KERNEL_OBJ`, `cameraserver`, `libcameraservice`, `check_vintf`, and debloated app targets) ensuring incremental builds compile updated camera and kernel modules cleanly without requiring a full multi-hour workspace wipe.
+7. **Cloud Upload:** Automatically packages build artifacts and uploads the resulting flashable ROM zip directly to Pixeldrain upon successful completion.
+
