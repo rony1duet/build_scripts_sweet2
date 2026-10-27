@@ -12,15 +12,10 @@ repo init \
     --depth=1
 
 echo "==========================================="
-echo "Setting up local manifest for PixelOS A17..."
+echo "Setting up local manifest (PixelOS-17-base)..."
 echo "==========================================="
 rm -rf .repo/local_manifests/
-git clone https://github.com/rony1duet/manifest_sweet2.git .repo/local_manifests -b PixelOS-17-base || \
-git clone https://github.com/rony1duet/manifest_sweet2.git .repo/local_manifests -b main
-
-if [ -f ".repo/local_manifests/sweet2_a17.xml" ] && [ ! -f ".repo/local_manifests/sweet2.xml" ]; then
-    cp -f .repo/local_manifests/sweet2_a17.xml .repo/local_manifests/sweet2.xml
-fi
+git clone https://github.com/rony1duet/manifest_sweet2.git .repo/local_manifests -b PixelOS-17-base
 
 # Clean unstaged modifications from prior builds that prevent clean repo sync
 git reset --hard HEAD 2>/dev/null || true
@@ -146,3 +141,4 @@ echo "Build complete! Uploading to Pixeldrain..."
 echo "==========================================="
 curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/upload_to_pixeldrain.sh -o /tmp/upload_to_pixeldrain.sh
 bash /tmp/upload_to_pixeldrain.sh
+
