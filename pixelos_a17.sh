@@ -26,12 +26,17 @@ if [ -d ".repo/manifests" ]; then
 fi
 
 repo forall -c "git reset --hard HEAD && git clean -fdx" 2>/dev/null || true
-for repo_dir in kernel/xiaomi/sm6150 device/xiaomi/sweet2 device/xiaomi/sm6150-common vendor/xiaomi/sweet2 vendor/xiaomi/sm6150-common hardware/xiaomi hardware/dolby; do
+for repo_dir in kernel/xiaomi/sm6150 device/xiaomi/sweet2 device/xiaomi/sm6150-common vendor/xiaomi/sweet2 vendor/xiaomi/sm6150-common hardware/xiaomi hardware/dolby build/soong; do
     if [ -d "$repo_dir/.git" ]; then
         git -C "$repo_dir" reset --hard HEAD 2>/dev/null || true
         git -C "$repo_dir" clean -fdx 2>/dev/null || true
     fi
 done
+
+if [ -d "build/soong/.git" ] && ! git -C build/soong remote get-url origin 2>/dev/null | grep -q "rony1duet/android_build_soong"; then
+    echo "Replacing build/soong with custom fork..."
+    rm -rf build/soong .repo/projects/build/soong.git .repo/project-objects/*build_soong.git 2>/dev/null || true
+fi
 
 echo "==========================================="
 echo "Syncing repositories on Crave..."
@@ -124,6 +129,28 @@ echo "==========================================="
 export BUILD_USERNAME=rony1duet
 export BUILD_HOSTNAME=crave
 export BUILD_BROKEN_MISSING_REQUIRED_MODULES=true
+
+# Memory and GC tuning to prevent soong_build OOM kills in container
+export GOGC=40
+export GOMEMLIMIT=14GiB
+export MALLOC_ARENA_MAX=2
+export SOONG_GOGC=40
+export SOONG_INCREMENTAL_ANALYSIS=false
+
+echo "==========================================="
+echo "Ensuring sufficient swap space..."
+echo "==========================================="
+free -h 2>/dev/null || true
+TOTAL_SWAP_MB=$(free -m 2>/dev/null | awk '/^Swap:/ {print $2}')
+if [ -n "$TOTAL_SWAP_MB" ] && [ "$TOTAL_SWAP_MB" -lt 8192 ]; then
+    echo "Swap space is under 8GB (${TOTAL_SWAP_MB}MB). Creating a 16GB swapfile to prevent OOM killer..."
+    sudo fallocate -l 16G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=16384 2>/dev/null || true
+    sudo chmod 600 /swapfile 2>/dev/null || true
+    sudo mkswap /swapfile 2>/dev/null || true
+    sudo swapon /swapfile 2>/dev/null || true
+    echo "Swap updated:"
+    free -h 2>/dev/null || true
+fi
 
 echo "Disk space status:"
 df -h / /tmp 2>/dev/null || true
