@@ -3,6 +3,16 @@
 ROM_MANIFEST_BRANCH="seventeen"
 
 echo "==========================================="
+echo "Cleaning unstaged modifications from prior builds..."
+echo "==========================================="
+git reset --hard HEAD 2>/dev/null || true
+git clean -fdx 2>/dev/null || true
+if [ -d ".repo/manifests" ]; then
+    git -C .repo/manifests reset --hard HEAD 2>/dev/null || true
+    git -C .repo/manifests clean -fdx 2>/dev/null || true
+fi
+
+echo "==========================================="
 echo "Initializing PixelOS ${ROM_MANIFEST_BRANCH}..."
 echo "==========================================="
 repo init \
@@ -17,14 +27,6 @@ echo "==========================================="
 rm -rf .repo/local_manifests/
 git clone https://github.com/rony1duet/manifest_sweet2.git .repo/local_manifests -b PixelOS-17-base
 
-# Clean unstaged modifications from prior builds that prevent clean repo sync
-git reset --hard HEAD 2>/dev/null || true
-git clean -fdx 2>/dev/null || true
-if [ -d ".repo/manifests" ]; then
-    git -C .repo/manifests reset --hard HEAD 2>/dev/null || true
-    git -C .repo/manifests clean -fdx 2>/dev/null || true
-fi
-
 repo forall -c "git reset --hard HEAD && git clean -fdx" 2>/dev/null || true
 for repo_dir in kernel/xiaomi/sm6150 device/xiaomi/sweet2 device/xiaomi/sm6150-common vendor/xiaomi/sweet2 vendor/xiaomi/sm6150-common hardware/xiaomi hardware/dolby build/soong; do
     if [ -d "$repo_dir/.git" ]; then
@@ -33,15 +35,23 @@ for repo_dir in kernel/xiaomi/sm6150 device/xiaomi/sweet2 device/xiaomi/sm6150-c
     fi
 done
 
-if [ -d "build/soong/.git" ] && ! git -C build/soong remote get-url origin 2>/dev/null | grep -q "rony1duet/android_build_soong"; then
-    echo "Replacing build/soong with custom fork..."
-    rm -rf build/soong .repo/projects/build/soong.git .repo/project-objects/*build_soong.git 2>/dev/null || true
-fi
-
 echo "==========================================="
 echo "Syncing repositories on Crave..."
 echo "==========================================="
 /opt/crave/resync.sh
+
+echo "==========================================="
+echo "Verifying Soong build system..."
+echo "==========================================="
+if [ ! -f "build/soong/soong_ui.bash" ]; then
+    echo "Warning: build/soong/soong_ui.bash missing after resync. Forcing sync of build/soong..."
+    repo sync -c -j4 --force-sync build/soong || true
+fi
+
+if [ ! -f "build/soong/soong_ui.bash" ]; then
+    echo "[ERROR] Missing build/soong/soong_ui.bash! Build environment is broken."
+    exit 1
+fi
 
 echo "==========================================="
 echo "Ensuring Git LFS toolchains and binaries..."
@@ -158,14 +168,28 @@ df -h / /tmp 2>/dev/null || true
 echo "==========================================="
 echo "Starting PixelOS sweet2 build (A17)..."
 echo "==========================================="
-source build/envsetup.sh
-breakfast sweet2
+if ! source build/envsetup.sh; then
+    echo "[ERROR] Failed to initialize Android build environment."
+    exit 1
+fi
 
-m pixelos
+if [ ! -f "build/soong/soong_ui.bash" ]; then
+    echo "[ERROR] Missing build/soong/soong_ui.bash"
+    exit 1
+fi
+
+if ! breakfast sweet2; then
+    echo "[ERROR] Failed to configure sweet2 product."
+    exit 1
+fi
+
+if ! m pixelos; then
+    echo "[ERROR] PixelOS build failed."
+    exit 1
+fi
 
 echo "==========================================="
 echo "Build complete! Uploading to Pixeldrain..."
 echo "==========================================="
 curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/upload_to_pixeldrain.sh -o /tmp/upload_to_pixeldrain.sh
 bash /tmp/upload_to_pixeldrain.sh
-
