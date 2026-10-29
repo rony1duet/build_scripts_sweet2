@@ -134,6 +134,7 @@ rm -f out/target/product/sweet2/system/bin/cameraserver 2>/dev/null || true
 rm -rf out/target/product/sweet2/system/app/Stk out/target/product/sweet2/system/priv-app/Stk 2>/dev/null || true
 rm -rf out/target/product/sweet2/system_ext/app/Aperture* out/target/product/sweet2/product/app/SafetyHub* out/target/product/sweet2/product/priv-app/SafetyHub* 2>/dev/null || true
 rm -rf out/target/product/sweet2/system/app/FMRadio out/target/product/sweet2/system/app/FM2 out/target/product/sweet2/product/priv-app/EmergencyInfo 2>/dev/null || true
+rm -rf out/soong/.intermediates/system/sepolicy/recovery_sepolicy.* 2>/dev/null || true
 
 echo "==========================================="
 echo "Exporting build environment variables..."
@@ -166,6 +167,28 @@ fi
 
 echo "Disk space status:"
 df -h / /tmp 2>/dev/null || true
+
+echo "==========================================="
+echo "Ensuring GCam prebuilts..."
+echo "==========================================="
+if [ ! -d "vendor/GCam_sweet2" ]; then
+    echo "Cloning vendor/GCam_sweet2..."
+    git clone https://github.com/rony1duet/GCam_sweet2.git vendor/GCam_sweet2 -b PixelOS-17-base --depth=1
+fi
+
+if [ ! -d "vendor/android_prebuilts_sweet2" ]; then
+    echo "Cloning vendor/android_prebuilts_sweet2..."
+    git clone https://github.com/rony1duet/android_prebuilts_sweet2.git vendor/android_prebuilts_sweet2 -b PixelOS-17-base --depth=1
+fi
+
+if [ -f "vendor/android_prebuilts_sweet2/gcam/fetch_gcam_prebuilt.sh" ]; then
+    bash vendor/android_prebuilts_sweet2/gcam/fetch_gcam_prebuilt.sh vendor/GCam_sweet2/system/product/app/GoogleCameraEng
+fi
+
+if [ ! -f "vendor/GCam_sweet2/system/product/app/GoogleCameraEng/GoogleCameraEng.apk" ]; then
+    echo "[ERROR] GoogleCameraEng.apk missing! GCam prebuilt fetch failed."
+    exit 1
+fi
 
 echo "==========================================="
 echo "Starting PixelOS sweet2 build (A17)..."
