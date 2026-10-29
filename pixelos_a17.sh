@@ -7,10 +7,12 @@ echo "Cleaning unstaged modifications from prior builds..."
 echo "==========================================="
 git reset --hard HEAD 2>/dev/null || true
 git clean -fdx 2>/dev/null || true
-if [ -d ".repo/manifests" ]; then
-    git -C .repo/manifests reset --hard HEAD 2>/dev/null || true
-    git -C .repo/manifests clean -fdx 2>/dev/null || true
-fi
+for gdir in .repo/manifests .repo/repo; do
+    if [ -d "$gdir" ]; then
+        git -C "$gdir" reset --hard HEAD 2>/dev/null || true
+        git -C "$gdir" clean -fdx 2>/dev/null || true
+    fi
+done
 
 echo "==========================================="
 echo "Initializing PixelOS ${ROM_MANIFEST_BRANCH}..."
