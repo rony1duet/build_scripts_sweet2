@@ -108,6 +108,7 @@ if [ -d "kernel/xiaomi/sm6150" ]; then
 fi
 
 # ---------------- GCam prebuilts ----------------
+rm -f vendor/GCam_sweet2/Android.mk 2>/dev/null || true
 if [ -f "vendor/android_prebuilts_sweet2/gcam/fetch_gcam_prebuilt.sh" ]; then
   sed -i 's/\r$//' vendor/android_prebuilts_sweet2/gcam/*.sh vendor/android_prebuilts_sweet2/gcam/*.env 2>/dev/null || true
   bash vendor/android_prebuilts_sweet2/gcam/fetch_gcam_prebuilt.sh \

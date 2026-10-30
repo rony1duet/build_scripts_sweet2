@@ -176,11 +176,20 @@ echo "==========================================="
 if [ ! -d "vendor/GCam_sweet2" ]; then
     echo "Cloning vendor/GCam_sweet2..."
     git clone https://github.com/rony1duet/GCam_sweet2.git vendor/GCam_sweet2 -b PixelOS-17-base --depth=1
+else
+    echo "Updating vendor/GCam_sweet2..."
+    git -C vendor/GCam_sweet2 fetch origin PixelOS-17-base --depth=1 2>/dev/null || true
+    git -C vendor/GCam_sweet2 reset --hard origin/PixelOS-17-base 2>/dev/null || true
 fi
+rm -f vendor/GCam_sweet2/Android.mk 2>/dev/null || true
 
 if [ ! -d "vendor/android_prebuilts_sweet2" ]; then
     echo "Cloning vendor/android_prebuilts_sweet2..."
     git clone https://github.com/rony1duet/android_prebuilts_sweet2.git vendor/android_prebuilts_sweet2 -b PixelOS-17-base --depth=1
+else
+    echo "Updating vendor/android_prebuilts_sweet2..."
+    git -C vendor/android_prebuilts_sweet2 fetch origin PixelOS-17-base --depth=1 2>/dev/null || true
+    git -C vendor/android_prebuilts_sweet2 reset --hard origin/PixelOS-17-base 2>/dev/null || true
 fi
 
 if [ -f "vendor/android_prebuilts_sweet2/gcam/fetch_gcam_prebuilt.sh" ]; then
