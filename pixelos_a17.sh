@@ -184,6 +184,7 @@ if [ ! -d "vendor/android_prebuilts_sweet2" ]; then
 fi
 
 if [ -f "vendor/android_prebuilts_sweet2/gcam/fetch_gcam_prebuilt.sh" ]; then
+    sed -i 's/\r$//' vendor/android_prebuilts_sweet2/gcam/*.sh vendor/android_prebuilts_sweet2/gcam/*.env 2>/dev/null || true
     bash vendor/android_prebuilts_sweet2/gcam/fetch_gcam_prebuilt.sh vendor/GCam_sweet2/system/product/app/GoogleCameraEng
 fi
 
