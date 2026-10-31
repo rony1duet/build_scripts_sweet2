@@ -136,7 +136,7 @@ rm -rf out/target/product/sweet2/system_ext/app/Aperture* out/target/product/swe
 rm -rf out/target/product/sweet2/system/app/FMRadio out/target/product/sweet2/system/app/FM2 out/target/product/sweet2/product/priv-app/EmergencyInfo 2>/dev/null || true
 rm -rf out/target/product/sweet2/system/priv-app/GooglePartnerSetup* out/target/product/sweet2/product/priv-app/GooglePartnerSetup* 2>/dev/null || true
 rm -rf out/target/product/sweet2/system/app/PlayAutoInstall* out/target/product/sweet2/product/app/PlayAutoInstall* 2>/dev/null || true
-rm -rf out/soong/.intermediates/system/sepolicy/recovery_sepolicy.* 2>/dev/null || true
+rm -rf out/soong/.intermediates/system/sepolicy/recovery_sepolicy.* out/soong/.intermediates/system/sepolicy/vendor_sepolicy.* 2>/dev/null || true
 
 echo "==========================================="
 echo "Exporting build environment variables..."
