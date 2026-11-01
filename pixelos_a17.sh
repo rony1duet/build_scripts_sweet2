@@ -130,6 +130,8 @@ rm -f out/soong/.intermediates/system/sepolicy/tools/version_policy/*/obj/system
 rm -rf out/soong/.intermediates/hardware/qcom/wlan/legacy/qcwcn/wifi_hal 2>/dev/null || true
 rm -rf out/soong/.intermediates/frameworks/av/services/camera/libcameraservice 2>/dev/null || true
 rm -rf out/soong/.intermediates/device/xiaomi/sm6150-common/camera 2>/dev/null || true
+rm -rf out/soong/.intermediates/device/xiaomi/sm6150-common/parts 2>/dev/null || true
+rm -rf out/target/product/sweet2/system_ext/priv-app/XiaomiParts 2>/dev/null || true
 rm -f out/target/product/sweet2/system/bin/cameraserver 2>/dev/null || true
 rm -rf out/target/product/sweet2/system/app/Stk out/target/product/sweet2/system/priv-app/Stk 2>/dev/null || true
 rm -rf out/target/product/sweet2/system_ext/app/Aperture* out/target/product/sweet2/product/app/SafetyHub* out/target/product/sweet2/product/priv-app/SafetyHub* 2>/dev/null || true
