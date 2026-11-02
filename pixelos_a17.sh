@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 ROM_MANIFEST_BRANCH="seventeen"
+DEVICE_BRANCH="PixelOS-17-base"
 
 echo "==========================================="
 echo "Cleaning unstaged modifications from prior builds..."
@@ -24,10 +25,10 @@ repo init \
     --depth=1
 
 echo "==========================================="
-echo "Setting up local manifest (PixelOS-17-base)..."
+echo "Setting up local manifest (${DEVICE_BRANCH})..."
 echo "==========================================="
 rm -rf .repo/local_manifests/
-git clone https://github.com/rony1duet/manifest_sweet2.git .repo/local_manifests -b PixelOS-17-base
+git clone https://github.com/rony1duet/manifest_sweet2.git .repo/local_manifests -b "${DEVICE_BRANCH}"
 
 repo forall -c "git reset --hard HEAD && git clean -fdx" 2>/dev/null || true
 for repo_dir in kernel/xiaomi/sm6150 device/xiaomi/sweet2 device/xiaomi/sm6150-common vendor/xiaomi/sweet2 vendor/xiaomi/sm6150-common hardware/xiaomi hardware/dolby build/soong; do
@@ -40,7 +41,38 @@ done
 echo "==========================================="
 echo "Syncing repositories on Crave..."
 echo "==========================================="
-/opt/crave/resync.sh
+if [ -x "/opt/crave/resync.sh" ]; then
+    /opt/crave/resync.sh
+else
+    repo sync -c -j"$(nproc --all 2>/dev/null || echo 4)" --force-sync --no-clone-bundle --no-tags
+fi
+
+echo "==========================================="
+echo "Ensuring latest commits on ${DEVICE_BRANCH}..."
+echo "==========================================="
+CUSTOM_REPOS=(
+    "device/xiaomi/sm6150-common:${DEVICE_BRANCH}"
+    "device/xiaomi/sweet2:${DEVICE_BRANCH}"
+    "kernel/xiaomi/sm6150:${DEVICE_BRANCH}"
+    "hardware/xiaomi:${DEVICE_BRANCH}"
+    "hardware/dolby:${DEVICE_BRANCH}"
+    "vendor/xiaomi/sm6150-common:${DEVICE_BRANCH}"
+    "vendor/xiaomi/sweet2:${DEVICE_BRANCH}"
+    "vendor/android_prebuilts_sweet2:${DEVICE_BRANCH}"
+    "vendor/GCam_sweet2:${DEVICE_BRANCH}"
+)
+
+for entry in "${CUSTOM_REPOS[@]}"; do
+    rdir="${entry%%:*}"
+    rbranch="${entry##*:}"
+    if [ -d "$rdir/.git" ]; then
+        echo "Updating $rdir to latest origin/$rbranch..."
+        git -C "$rdir" fetch origin "$rbranch" --depth=1 2>/dev/null || true
+        git -C "$rdir" checkout -B "$rbranch" "origin/$rbranch" 2>/dev/null || git -C "$rdir" reset --hard "origin/$rbranch" 2>/dev/null || true
+        COMMIT_INFO=$(git -C "$rdir" log -1 --oneline 2>/dev/null || true)
+        echo " -> $rdir is at: $COMMIT_INFO"
+    fi
+done
 
 echo "==========================================="
 echo "Verifying Soong build system..."
@@ -123,9 +155,12 @@ fi
 
 # Clean up partial intermediate objects from previous aborted runs
 rm -rf out/target/product/sweet2/obj/KERNEL_OBJ 2>/dev/null || true
-rm -rf out/target/product/sweet2/obj/PACKAGING/check_vintf_all_intermediates 2>/dev/null || true
-rm -rf out/target/product/sweet2/vendor/etc/vintf 2>/dev/null || true
+rm -rf out/target/product/sweet2/obj/PACKAGING/check_vintf* 2>/dev/null || true
+rm -rf out/target/product/sweet2/obj/PACKAGING/privapp_permissions* 2>/dev/null || true
+rm -rf out/target/product/sweet2/*/etc/vintf 2>/dev/null || true
+rm -rf out/target/product/sweet2/etc/vintf 2>/dev/null || true
 rm -f out/target/product/sweet2/system/etc/vintf/compatibility_matrix.device.xml 2>/dev/null || true
+rm -rf out/target/product/sweet2/system_ext/etc/permissions 2>/dev/null || true
 rm -f out/soong/.intermediates/frameworks/base/core/jni/libandroid_runtime/*/obj/frameworks/base/core/jni/android_os_SELinux.o 2>/dev/null || true
 rm -f out/soong/.intermediates/system/sepolicy/tools/version_policy/*/obj/system/sepolicy/tools/version_policy.o 2>/dev/null || true
 rm -rf out/soong/.intermediates/hardware/qcom/wlan/legacy/qcwcn/wifi_hal 2>/dev/null || true
@@ -178,21 +213,21 @@ echo "Ensuring GCam prebuilts..."
 echo "==========================================="
 if [ ! -d "vendor/GCam_sweet2" ]; then
     echo "Cloning vendor/GCam_sweet2..."
-    git clone https://github.com/rony1duet/GCam_sweet2.git vendor/GCam_sweet2 -b PixelOS-17-base --depth=1
+    git clone https://github.com/rony1duet/GCam_sweet2.git vendor/GCam_sweet2 -b "${DEVICE_BRANCH}" --depth=1
 else
     echo "Updating vendor/GCam_sweet2..."
-    git -C vendor/GCam_sweet2 fetch origin PixelOS-17-base --depth=1 2>/dev/null || true
-    git -C vendor/GCam_sweet2 reset --hard origin/PixelOS-17-base 2>/dev/null || true
+    git -C vendor/GCam_sweet2 fetch origin "${DEVICE_BRANCH}" --depth=1 2>/dev/null || true
+    git -C vendor/GCam_sweet2 reset --hard origin/"${DEVICE_BRANCH}" 2>/dev/null || true
 fi
 rm -f vendor/GCam_sweet2/Android.mk 2>/dev/null || true
 
 if [ ! -d "vendor/android_prebuilts_sweet2" ]; then
     echo "Cloning vendor/android_prebuilts_sweet2..."
-    git clone https://github.com/rony1duet/android_prebuilts_sweet2.git vendor/android_prebuilts_sweet2 -b PixelOS-17-base --depth=1
+    git clone https://github.com/rony1duet/android_prebuilts_sweet2.git vendor/android_prebuilts_sweet2 -b "${DEVICE_BRANCH}" --depth=1
 else
     echo "Updating vendor/android_prebuilts_sweet2..."
-    git -C vendor/android_prebuilts_sweet2 fetch origin PixelOS-17-base --depth=1 2>/dev/null || true
-    git -C vendor/android_prebuilts_sweet2 reset --hard origin/PixelOS-17-base 2>/dev/null || true
+    git -C vendor/android_prebuilts_sweet2 fetch origin "${DEVICE_BRANCH}" --depth=1 2>/dev/null || true
+    git -C vendor/android_prebuilts_sweet2 reset --hard origin/"${DEVICE_BRANCH}" 2>/dev/null || true
 fi
 
 if [ -f "vendor/android_prebuilts_sweet2/gcam/fetch_gcam_prebuilt.sh" ]; then
@@ -231,5 +266,5 @@ fi
 echo "==========================================="
 echo "Build complete! Uploading to Pixeldrain..."
 echo "==========================================="
-curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/upload_to_pixeldrain.sh -o /tmp/upload_to_pixeldrain.sh
+curl -fsSL "https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/${DEVICE_BRANCH}/upload_to_pixeldrain.sh" -o /tmp/upload_to_pixeldrain.sh
 bash /tmp/upload_to_pixeldrain.sh
