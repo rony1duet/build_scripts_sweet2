@@ -124,7 +124,8 @@ fi
 # Clean up partial intermediate objects from previous aborted runs
 rm -rf out/target/product/sweet2/obj/KERNEL_OBJ 2>/dev/null || true
 rm -rf out/target/product/sweet2/obj/PACKAGING/check_vintf_all_intermediates 2>/dev/null || true
-rm -f out/target/product/sweet2/vendor/etc/vintf/manifest.xml 2>/dev/null || true
+rm -rf out/target/product/sweet2/vendor/etc/vintf 2>/dev/null || true
+rm -f out/target/product/sweet2/system/etc/vintf/compatibility_matrix.device.xml 2>/dev/null || true
 rm -f out/soong/.intermediates/frameworks/base/core/jni/libandroid_runtime/*/obj/frameworks/base/core/jni/android_os_SELinux.o 2>/dev/null || true
 rm -f out/soong/.intermediates/system/sepolicy/tools/version_policy/*/obj/system/sepolicy/tools/version_policy.o 2>/dev/null || true
 rm -rf out/soong/.intermediates/hardware/qcom/wlan/legacy/qcwcn/wifi_hal 2>/dev/null || true
