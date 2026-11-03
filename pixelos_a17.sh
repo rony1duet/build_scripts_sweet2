@@ -175,6 +175,8 @@ rm -rf out/target/product/sweet2/system/app/FMRadio out/target/product/sweet2/sy
 rm -rf out/target/product/sweet2/system/priv-app/GooglePartnerSetup* out/target/product/sweet2/product/priv-app/GooglePartnerSetup* 2>/dev/null || true
 rm -rf out/target/product/sweet2/system/app/PlayAutoInstall* out/target/product/sweet2/product/app/PlayAutoInstall* 2>/dev/null || true
 rm -rf out/soong/.intermediates/system/sepolicy/recovery_sepolicy.* out/soong/.intermediates/system/sepolicy/vendor_sepolicy.* 2>/dev/null || true
+rm -rf out/soong/.intermediates/vendor/GCam_sweet2 2>/dev/null || true
+rm -rf out/target/product/sweet2/product/app/GoogleCameraEng 2>/dev/null || true
 
 echo "==========================================="
 echo "Exporting build environment variables..."
