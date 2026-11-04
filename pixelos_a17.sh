@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 ROM_MANIFEST_BRANCH="seventeen"
-DEVICE_BRANCH="PixelOS-17-base"
+DEVICE_BRANCH="main"
 
 echo "==========================================="
 echo "Cleaning unstaged modifications from prior builds..."
@@ -29,6 +29,12 @@ echo "Setting up local manifest (${DEVICE_BRANCH})..."
 echo "==========================================="
 rm -rf .repo/local_manifests/
 git clone https://github.com/rony1duet/manifest_sweet2.git .repo/local_manifests -b "${DEVICE_BRANCH}"
+
+# Preserve any existing GCam prebuilt APK to cache before repository reset
+if [ -f "vendor/GCam_sweet2/system/product/app/GoogleCameraEng/GoogleCameraEng.apk" ]; then
+    mkdir -p /tmp/gcam_cache 2>/dev/null || true
+    cp -f "vendor/GCam_sweet2/system/product/app/GoogleCameraEng/GoogleCameraEng.apk" "/tmp/gcam_cache/MGC_9.6.080_V52_ENG.apk" 2>/dev/null || true
+fi
 
 repo forall -c "git reset --hard HEAD && git clean -fdx" 2>/dev/null || true
 for repo_dir in kernel/xiaomi/sm6150 device/xiaomi/sweet2 device/xiaomi/sm6150-common vendor/xiaomi/sweet2 vendor/xiaomi/sm6150-common hardware/xiaomi hardware/dolby build/soong; do
