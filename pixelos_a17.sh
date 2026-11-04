@@ -237,6 +237,7 @@ else
     git -C vendor/android_prebuilts_sweet2 fetch origin "${DEVICE_BRANCH}" --depth=1 2>/dev/null || true
     git -C vendor/android_prebuilts_sweet2 reset --hard origin/"${DEVICE_BRANCH}" 2>/dev/null || true
 fi
+(cd vendor/android_prebuilts_sweet2 && git lfs pull) 2>/dev/null || true
 
 if [ -f "vendor/android_prebuilts_sweet2/gcam/fetch_gcam_prebuilt.sh" ]; then
     sed -i 's/\r$//' vendor/android_prebuilts_sweet2/gcam/*.sh vendor/android_prebuilts_sweet2/gcam/*.env 2>/dev/null || true
