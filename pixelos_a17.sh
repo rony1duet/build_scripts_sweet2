@@ -32,8 +32,9 @@ git clone https://github.com/rony1duet/manifest_sweet2.git .repo/local_manifests
 
 # Preserve any existing GCam prebuilt APK to cache before repository reset
 if [ -f "vendor/GCam_sweet2/system/product/app/GoogleCameraEng/GoogleCameraEng.apk" ]; then
-    mkdir -p /tmp/gcam_cache 2>/dev/null || true
-    cp -f "vendor/GCam_sweet2/system/product/app/GoogleCameraEng/GoogleCameraEng.apk" "/tmp/gcam_cache/MGC_9.6.080_V52_ENG.apk" 2>/dev/null || true
+    mkdir -p /tmp/gcam_cache "${HOME:-/root}/.cache/gcam" 2>/dev/null || true
+    cp -f "vendor/GCam_sweet2/system/product/app/GoogleCameraEng/GoogleCameraEng.apk" "/tmp/gcam_cache/GoogleCameraEng.apk" 2>/dev/null || true
+    cp -f "vendor/GCam_sweet2/system/product/app/GoogleCameraEng/GoogleCameraEng.apk" "${HOME:-/root}/.cache/gcam/GoogleCameraEng.apk" 2>/dev/null || true
 fi
 
 repo forall -c "git reset --hard HEAD && git clean -fdx" 2>/dev/null || true
