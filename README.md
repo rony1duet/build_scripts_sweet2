@@ -1,48 +1,32 @@
-# PixelOS sweet2 Build Scripts
+# PixelOS 17 Build Scripts (`sweet2`)
 
-Automated build and packaging scripts for compiling **PixelOS** on **Redmi Note 12 Pro 4G (`sweet2`)** via [Crave](https://crave.io).
-
----
-
-## 📋 Official Release & Changelog Documentation
-
-The official release documentation, hardware matrix, subsystem changes, and flashing runbooks are hosted in:
-👉 **[CHANGELOG.md](./CHANGELOG.md)**
+Automated build and packaging scripts for compiling **PixelOS 17 (Android 17)** on **Redmi Note 12 Pro 4G (`sweet2`)** via [Crave](https://crave.io).
 
 ---
 
-## 🌿 Branch & Script Organization
+## 📋 Full Documentation & Release Changelog
 
-Build scripts and deployment assets are strictly separated across dedicated branches:
-
-| Branch | Android Version | Primary Build Script | Description |
-| :--- | :--- | :--- | :--- |
-| **`main`** | All / Docs | [`CHANGELOG.md`](./CHANGELOG.md) | Central documentation hub and release changelogs |
-| **`PixelOS-17-base`** | Android 17.0 | [`pixelos_a17.sh`](https://github.com/rony1duet/build_scripts_sweet2/blob/PixelOS-17-base/pixelos_a17.sh) | Automated Crave build script for PixelOS 17 |
-| **`PixelOS-16-QPR2`** | Android 16.2 | [`pixelos_a16.sh`](https://github.com/rony1duet/build_scripts_sweet2/blob/PixelOS-16-QPR2/pixelos_a16.sh) | Automated Crave build script for PixelOS 16 QPR2 |
+The complete ROM release changelog and architecture documentation are maintained directly on the **main** branch:
+👉 **[View Official Release Changelog](./CHANGELOG.md)**
 
 ---
 
 ## 🚀 Quick Start on Crave
 
-### Build PixelOS 17 (Android 17)
-```bash
-crave run --no-patch -- "bash <(curl -sL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/PixelOS-17-base/pixelos_a17.sh)"
-```
+To compile PixelOS 17 for sweet2:
 
-### Build PixelOS 16.2 (Android 16 QPR2)
 ```bash
-crave run --no-patch -- "bash <(curl -sL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/PixelOS-16-QPR2/pixelos_a16.sh)"
+crave run --no-patch -- "bash <(curl -sL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a17.sh)"
 ```
 
 ---
 
-## 🛠️ Automated Script Capabilities
+## 🛠️ Script Capabilities
 
-1. **Manifest Setup:** Automatically clones and configures the appropriate local manifest branch (`PixelOS-16-QPR2` or `PixelOS-17-base`) from [`rony1duet/manifest_sweet2`](https://github.com/rony1duet/manifest_sweet2).
-2. **Repository Sync & Parity:** Automatically resyncs and checks out the matching remote branch for all custom device trees, vendor packages, kernel, and hardware HALs.
-3. **Clang Pointer Verification:** Inspects Clang compiler binaries. If Git LFS pointer files are detected instead of real binaries, the script automatically triggers force-resync and LFS pull before invoking the build.
-4. **Policy Normalization:** Strips Windows CRLF line endings from all `sepolicy` files across device, hardware, vendor, and system directories to prevent policy compiler syntax errors.
-5. **KernelSU-Next & SusFS Preservation:** Preserves native kernel drivers for Multi-Manager KernelSU-Next (UAPI 6, v3.4.2 manager compatible) and SusFS v2.3.0.
-6. **Smart Intermediate Cleaning:** Removes partial intermediate objects (`KERNEL_OBJ`, `XiaomiParts`, `libcameraservice`, `check_vintf`, and debloated app targets) ensuring incremental builds compile updated camera, parts, and sepolicy modules cleanly without requiring a full multi-hour workspace wipe.
-7. **Cloud Upload:** Automatically packages build artifacts and uploads the resulting flashable ROM zip directly to Pixeldrain upon successful completion.
+[`pixelos_a17.sh`](./pixelos_a17.sh) automates the full build lifecycle:
+1. **Manifest Setup:** Clones and configures `sweet2.xml` from [`manifest_sweet2`](https://github.com/rony1duet/manifest_sweet2) (`main`).
+2. **Repository Parity:** Synchronizes custom device, vendor, kernel, and hardware trees directly to `origin/main`.
+3. **Clang Verification:** Inspects Git LFS toolchains and self-heals ASCII pointer files.
+4. **Intermediate Invalidation:** Wipes stale VINTF and priv-app permission targets to validate FCM level 7.
+5. **GCam Prebuilts:** Automatically downloads and prepares Google Camera prebuilts with local cache preservation and mirror fallbacks.
+6. **Pixeldrain Upload:** Packages and uploads flashable ROM zips via [`upload_to_pixeldrain.sh`](./upload_to_pixeldrain.sh).
