@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 ROM_MANIFEST_BRANCH="seventeen"
-DEVICE_BRANCH="main"
+DEVICE_BRANCH="PixelOS-17-base"
 
 echo "==========================================="
 echo "Cleaning unstaged modifications from prior builds..."
