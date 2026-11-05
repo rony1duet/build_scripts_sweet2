@@ -141,12 +141,17 @@ if [ -n "$CLANG_BIN" ]; then
     chmod +x "$CLANG_BIN"
     "$CLANG_BIN" --version || echo "WARNING: Clang execution test returned non-zero"
 fi
+
+# Prune Git LFS local blob cache to reclaim 20-30GB of container disk space
+echo "Pruning Git LFS object cache to free disk space..."
+find prebuilts/ -type d -name "lfs" -path "*/.git/lfs" -exec rm -rf {} + 2>/dev/null || true
+git lfs prune 2>/dev/null || true
 echo "==============================="
 
 echo "==========================================="
-echo "Ensuring UNIX line endings on policy files..."
+echo "Ensuring UNIX line endings on build configs and scripts..."
 echo "==========================================="
-find device/ hardware/ vendor/ system/ -path "*/sepolicy/*" -type f -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+find device/ hardware/ vendor/ system/ -type f \( -name "*.sh" -o -name "*.env" -o -name "*.bp" -o -name "*.mk" -o -name "*.xml" -o -name "*.rc" -o -path "*/sepolicy/*" \) -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 
 echo "==========================================="
 echo "Restoring native KernelSU in sm6150 kernel..."
