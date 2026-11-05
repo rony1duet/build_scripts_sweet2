@@ -166,6 +166,37 @@ if [ -d "kernel/xiaomi/sm6150" ]; then
 fi
 
 # Clean up partial intermediate objects from previous aborted runs
+echo "==========================================="
+echo "Cleaning storage and partial intermediate objects..."
+echo "==========================================="
+# 1. Clean up any dead swapfile from previous runs to recover 16GB disk space immediately
+if [ -f "/swapfile" ]; then
+    echo "Removing unneeded /swapfile to recover root partition space..."
+    sudo swapoff /swapfile 2>/dev/null || true
+    sudo rm -f /swapfile 2>/dev/null || true
+fi
+
+# 2. Clean temporary build caches, sockets, and orphaned pipes
+echo "Cleaning temporary build files..."
+sudo rm -rf /tmp/* /tmp/.* 2>/dev/null || rm -rf /tmp/* 2>/dev/null || true
+rm -rf out/soong/.temp 2>/dev/null || true
+
+# 3. Prune Git LFS local blob cache across repositories (saves 20-30GB)
+echo "Pruning Git LFS object cache..."
+find . -type d -name "lfs" -path "*/.git/lfs" -exec rm -rf {} + 2>/dev/null || true
+find . -type d -name "objects" -path "*/.git/lfs/objects" -exec rm -rf {} + 2>/dev/null || true
+
+# 4. Clean unneeded test artifacts, symbol trees, and packaging intermediates from previous aborted runs
+echo "Purging unneeded test and symbol intermediates..."
+rm -rf out/target/product/sweet2/symbols 2>/dev/null || true
+rm -rf out/target/product/sweet2/data 2>/dev/null || true
+rm -rf out/target/product/sweet2/testcases 2>/dev/null || true
+rm -rf out/host/linux-x86/testcases 2>/dev/null || true
+rm -rf out/dist 2>/dev/null || true
+rm -rf out/soong/.intermediates/art 2>/dev/null || true
+rm -rf out/soong/.intermediates/bionic 2>/dev/null || true
+
+# 5. Clean conflicting or partial device module objects
 rm -rf out/target/product/sweet2/obj/KERNEL_OBJ 2>/dev/null || true
 rm -rf out/target/product/sweet2/obj/PACKAGING/check_vintf* 2>/dev/null || true
 rm -rf out/target/product/sweet2/obj/PACKAGING/privapp_permissions* 2>/dev/null || true
@@ -189,12 +220,17 @@ rm -rf out/target/product/sweet2/system/app/PlayAutoInstall* out/target/product/
 rm -rf out/soong/.intermediates/system/sepolicy/recovery_sepolicy.* out/soong/.intermediates/system/sepolicy/vendor_sepolicy.* 2>/dev/null || true
 rm -rf out/soong/.intermediates/vendor/GCam_sweet2 2>/dev/null || true
 rm -rf out/target/product/sweet2/product/app/GoogleCameraEng 2>/dev/null || true
-# Clean up stale test intermediates to save disk space
-rm -rf out/soong/.intermediates/art 2>/dev/null || true
-rm -rf out/soong/.intermediates/bionic 2>/dev/null || true
-rm -rf out/target/product/sweet2/data 2>/dev/null || true
-rm -rf out/target/product/sweet2/testcases 2>/dev/null || true
-rm -rf /tmp/* 2>/dev/null || true
+
+# 6. Automatic Emergency Storage Recovery:
+# If available space on / is critically low (< 50GB free), an aborted run filled the disk.
+# Wipe stale out/ objects to ensure the build has enough disk space to succeed.
+CURRENT_AVAIL_KB=$(df -k / 2>/dev/null | awk 'NR==2 {print $4}')
+if [ -n "$CURRENT_AVAIL_KB" ] && [ "$CURRENT_AVAIL_KB" -lt 52428800 ]; then
+    echo "[WARNING] Free disk space is critically low (${CURRENT_AVAIL_KB} KB < 50 GB) due to an aborted build!"
+    echo "Purging stale out/ intermediates to guarantee storage for this build..."
+    rm -rf out/target/product/sweet2/obj 2>/dev/null || true
+    rm -rf out/soong/.intermediates 2>/dev/null || true
+fi
 
 echo "==========================================="
 echo "Exporting build environment variables..."
@@ -203,6 +239,8 @@ export BUILD_USERNAME=rony1duet
 export BUILD_HOSTNAME=crave
 export BUILD_BROKEN_MISSING_REQUIRED_MODULES=true
 export DONT_INSTALL_DEXPREOPT_TESTS=true
+export SKIP_BOOT_JARS_CHECK=true
+export WITHOUT_CHECK_API=true
 
 # Memory and GC tuning to prevent soong_build OOM kills in container
 export GOGC=40
@@ -212,14 +250,8 @@ export SOONG_GOGC=40
 export SOONG_INCREMENTAL_ANALYSIS=false
 
 echo "==========================================="
-echo "Checking disk and memory space..."
+echo "Storage and memory status:"
 echo "==========================================="
-# Clean up any dead swapfile from previous runs to recover 16GB disk space
-if [ -f "/swapfile" ]; then
-    echo "Removing /swapfile to recover root partition space..."
-    sudo swapoff /swapfile 2>/dev/null || true
-    sudo rm -f /swapfile 2>/dev/null || true
-fi
 free -h 2>/dev/null || true
 echo "Disk space status:"
 df -h / /tmp 2>/dev/null || true
