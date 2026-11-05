@@ -184,6 +184,12 @@ rm -rf out/target/product/sweet2/system/app/PlayAutoInstall* out/target/product/
 rm -rf out/soong/.intermediates/system/sepolicy/recovery_sepolicy.* out/soong/.intermediates/system/sepolicy/vendor_sepolicy.* 2>/dev/null || true
 rm -rf out/soong/.intermediates/vendor/GCam_sweet2 2>/dev/null || true
 rm -rf out/target/product/sweet2/product/app/GoogleCameraEng 2>/dev/null || true
+# Clean up stale test intermediates to save disk space
+rm -rf out/soong/.intermediates/art 2>/dev/null || true
+rm -rf out/soong/.intermediates/bionic 2>/dev/null || true
+rm -rf out/target/product/sweet2/data 2>/dev/null || true
+rm -rf out/target/product/sweet2/testcases 2>/dev/null || true
+rm -rf /tmp/* 2>/dev/null || true
 
 echo "==========================================="
 echo "Exporting build environment variables..."
@@ -191,6 +197,7 @@ echo "==========================================="
 export BUILD_USERNAME=rony1duet
 export BUILD_HOSTNAME=crave
 export BUILD_BROKEN_MISSING_REQUIRED_MODULES=true
+export DONT_INSTALL_DEXPREOPT_TESTS=true
 
 # Memory and GC tuning to prevent soong_build OOM kills in container
 export GOGC=40
@@ -200,20 +207,15 @@ export SOONG_GOGC=40
 export SOONG_INCREMENTAL_ANALYSIS=false
 
 echo "==========================================="
-echo "Ensuring sufficient swap space..."
+echo "Checking disk and memory space..."
 echo "==========================================="
-free -h 2>/dev/null || true
-TOTAL_SWAP_MB=$(free -m 2>/dev/null | awk '/^Swap:/ {print $2}')
-if [ -n "$TOTAL_SWAP_MB" ] && [ "$TOTAL_SWAP_MB" -lt 8192 ]; then
-    echo "Swap space is under 8GB (${TOTAL_SWAP_MB}MB). Creating a 16GB swapfile to prevent OOM killer..."
-    sudo fallocate -l 16G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=16384 2>/dev/null || true
-    sudo chmod 600 /swapfile 2>/dev/null || true
-    sudo mkswap /swapfile 2>/dev/null || true
-    sudo swapon /swapfile 2>/dev/null || true
-    echo "Swap updated:"
-    free -h 2>/dev/null || true
+# Clean up any dead swapfile from previous runs to recover 16GB disk space
+if [ -f "/swapfile" ]; then
+    echo "Removing /swapfile to recover root partition space..."
+    sudo swapoff /swapfile 2>/dev/null || true
+    sudo rm -f /swapfile 2>/dev/null || true
 fi
-
+free -h 2>/dev/null || true
 echo "Disk space status:"
 df -h / /tmp 2>/dev/null || true
 
@@ -267,7 +269,7 @@ if ! breakfast sweet2; then
     exit 1
 fi
 
-if ! m pixelos; then
+if ! m bacon; then
     echo "[ERROR] PixelOS build failed."
     exit 1
 fi
@@ -275,5 +277,5 @@ fi
 echo "==========================================="
 echo "Build complete! Uploading to Pixeldrain..."
 echo "==========================================="
-curl -fsSL "https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/${DEVICE_BRANCH}/upload_to_pixeldrain.sh" -o /tmp/upload_to_pixeldrain.sh
+curl -fsSL "https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/upload_to_pixeldrain.sh" -o /tmp/upload_to_pixeldrain.sh
 bash /tmp/upload_to_pixeldrain.sh
