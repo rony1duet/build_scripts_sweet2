@@ -269,7 +269,7 @@ if ! breakfast sweet2; then
     exit 1
 fi
 
-if ! m bacon; then
+if ! m pixelos; then
     echo "[ERROR] PixelOS build failed."
     exit 1
 fi
