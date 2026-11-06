@@ -244,6 +244,9 @@ sanitize_configs() {
         rm -rf kernel/xiaomi/sm6150/KernelSU kernel/xiaomi/sm6150/drivers/kernelsu
         git -C kernel/xiaomi/sm6150 checkout HEAD -- drivers/kernelsu drivers/Makefile drivers/Kconfig fs/ 2>/dev/null || true
     fi
+
+    # Clear stale or aborted soong bootstrap ninja state
+    rm -rf out/soong/.bootstrap out/soong/build.*.ninja out/soong/.temp 2>/dev/null || true
 }
 
 setup_environment() {
