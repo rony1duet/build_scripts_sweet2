@@ -96,6 +96,7 @@ crave run --no-patch -- "curl -sL https://raw.githubusercontent.com/rony1duet/bu
 6. **GCam Prebuilt**: Prepares Google Camera prebuilts with local caching and SHA-256 verification.
 7. **Compilation**: Executes `breakfast sweet2` and builds `pixelos`.
 8. **Upload**: Automatically uploads the artifact to Pixeldrain (skippable via `--no-upload`).
+9. **Consolidated Failure Diagnostics**: On any compilation or build error, aggregates system resources, cgroup limits, kernel dmesg, Soong error logs, and terminal output into a single root `build_failure.log` while clearing intermediate fragmented logs and temp ninja folders in `out/`.
 
 ---
 
