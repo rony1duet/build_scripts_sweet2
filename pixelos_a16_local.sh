@@ -8,7 +8,7 @@
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.3.0"
+readonly SCRIPT_VERSION="1.3.1"
 readonly ROM_NAME="PixelOS"
 readonly ROM_MANIFEST_URL="https://github.com/PixelOS-AOSP/android_manifest.git"
 readonly ROM_MANIFEST_BRANCH="sixteen-qpr2"
@@ -36,9 +36,186 @@ for arg in "$@"; do
     esac
 done
 
+readonly FAILURE_LOG="${WORKSPACE_DIR}/build_failure.log"
+BUILD_SUCCESS=false
+LAST_ERROR_MSG=""
+COLLECTED_FAILURE_LOGS=false
+
 info() { printf "\033[0;34m==>\033[0m \033[1m%s\033[0m\n" "$*"; }
 warn() { printf "\033[1;33m[!]\033[0m %s\n" "$*"; }
-die()  { printf "\033[0;31m[x]\033[0m %s\n" "$*" >&2; exit 1; }
+die()  {
+    local msg="$*"
+    LAST_ERROR_MSG="$msg"
+    printf "\033[0;31m[x]\033[0m %s\n" "$msg" >&2
+    collect_failure_logs 1 "$LINENO" "$msg"
+    exit 1
+}
+
+collect_failure_logs() {
+    local rc="${1:-1}"
+    local line="${2:-$LINENO}"
+    local cmd="${3:-unknown}"
+
+    if [[ "$COLLECTED_FAILURE_LOGS" == "true" ]]; then
+        return 0
+    fi
+    COLLECTED_FAILURE_LOGS=true
+
+    # Temporarily disable set -e and ERR trap while writing diagnostic log
+    set +e
+    trap - ERR
+
+    printf "\n\033[0;31m[x]\033[0m Build failed (exit code %s). Collecting all diagnostic logs into \033[1m%s\033[0m...\n" "$rc" "$FAILURE_LOG"
+
+    {
+        echo "================================================================================"
+        echo "                      PIXELOS BUILD FAILURE DIAGNOSTIC REPORT                   "
+        echo "================================================================================"
+        echo "Timestamp:         $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "Script Version:    ${SCRIPT_VERSION}"
+        echo "Target ROM:        ${ROM_NAME} (${ROM_MANIFEST_BRANCH})"
+        echo "Target Device:     ${DEVICE_CODENAME} (${DEVICE_BRANCH})"
+        echo "Exit Code:         ${rc}"
+        echo "Failed Line:       ${line}"
+        echo "Failed Command:    ${cmd}"
+        [[ -n "$LAST_ERROR_MSG" ]] && echo "Error Message:     ${LAST_ERROR_MSG}"
+        echo "Hostname:          $(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null || echo 'unknown')"
+        echo "User:              $(whoami 2>/dev/null || id -un 2>/dev/null || echo 'unknown')"
+        echo "Working Directory: ${WORKSPACE_DIR}"
+        echo "================================================================================"
+        echo ""
+
+        echo "--------------------------------------------------------------------------------"
+        echo "1. SYSTEM & RESOURCE DIAGNOSTICS"
+        echo "--------------------------------------------------------------------------------"
+        echo "--> System Uptime and Load Average:"
+        uptime 2>&1 || true
+        echo ""
+        echo "--> Memory and Swap Allocation (free -h):"
+        free -h 2>&1 || true
+        echo ""
+        echo "--> Workspace Disk Usage (df -h):"
+        df -h "${WORKSPACE_DIR}" 2>&1 || true
+        echo ""
+
+        echo "--------------------------------------------------------------------------------"
+        echo "2. CGROUP MEMORY CONTROLLER & CONTAINER STATS"
+        echo "--------------------------------------------------------------------------------"
+        if [[ -f /sys/fs/cgroup/memory.events ]]; then
+            echo "--> CGroup v2 Events (/sys/fs/cgroup/memory.events):"
+            cat /sys/fs/cgroup/memory.events 2>&1 || true
+            echo "--> CGroup v2 Current Usage (/sys/fs/cgroup/memory.current):"
+            cat /sys/fs/cgroup/memory.current 2>&1 || true
+            echo "--> CGroup v2 Max Limit (/sys/fs/cgroup/memory.max):"
+            cat /sys/fs/cgroup/memory.max 2>&1 || true
+        fi
+        if [[ -f /sys/fs/cgroup/memory/memory.oom_control ]]; then
+            echo "--> CGroup v1 OOM Control (/sys/fs/cgroup/memory/memory.oom_control):"
+            cat /sys/fs/cgroup/memory/memory.oom_control 2>&1 || true
+            echo "--> CGroup v1 Memory Limit (/sys/fs/cgroup/memory/memory.limit_in_bytes):"
+            cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>&1 || true
+            echo "--> CGroup v1 Memory Usage (/sys/fs/cgroup/memory/memory.usage_in_bytes):"
+            cat /sys/fs/cgroup/memory/memory.usage_in_bytes 2>&1 || true
+        fi
+        echo "--> Process CGroup Membership (/proc/self/cgroup):"
+        cat /proc/self/cgroup 2>&1 || true
+        echo ""
+
+        echo "--------------------------------------------------------------------------------"
+        echo "3. KERNEL DMESG OOM & KILLED EVENTS"
+        echo "--------------------------------------------------------------------------------"
+        if dmesg -T >/dev/null 2>&1; then
+            dmesg -T | grep -E -i "oom|killed|soong|out of memory" | tail -n 30 || echo "No OOM/killed messages found in dmesg."
+        else
+            echo "Kernel buffer read not permitted (unprivileged container environment)."
+        fi
+        echo ""
+
+        echo "--------------------------------------------------------------------------------"
+        echo "4. ANDROID BUILD ERROR LOG (out/error.log)"
+        echo "--------------------------------------------------------------------------------"
+        if [[ -f "${WORKSPACE_DIR}/out/error.log" ]]; then
+            cat "${WORKSPACE_DIR}/out/error.log"
+        else
+            echo "out/error.log was not generated."
+        fi
+        echo ""
+
+        echo "--------------------------------------------------------------------------------"
+        echo "5. SOONG BUILD LOG (out/soong.log - Last 150 Lines)"
+        echo "--------------------------------------------------------------------------------"
+        if [[ -f "${WORKSPACE_DIR}/out/soong.log" ]]; then
+            tail -n 150 "${WORKSPACE_DIR}/out/soong.log"
+        else
+            echo "out/soong.log was not generated."
+        fi
+        echo ""
+
+        echo "--------------------------------------------------------------------------------"
+        echo "6. SISO / NINJA BUILD LOGS"
+        echo "--------------------------------------------------------------------------------"
+        local found_ninja=false
+        for ninja_file in "${WORKSPACE_DIR}"/out/soong/siso* "${WORKSPACE_DIR}"/out/siso* "${WORKSPACE_DIR}"/out/.ninja_log; do
+            if [[ -f "$ninja_file" ]]; then
+                found_ninja=true
+                echo "--> File: ${ninja_file} (Last 50 lines):"
+                tail -n 50 "$ninja_file" 2>&1 || true
+                echo ""
+            fi
+        done
+        if [[ "$found_ninja" == "false" ]]; then
+            echo "No siso or ninja failure logs found."
+        fi
+        echo ""
+
+        echo "--------------------------------------------------------------------------------"
+        echo "7. TERMINAL COMPILATION STREAM (Last 200 Lines)"
+        echo "--------------------------------------------------------------------------------"
+        if [[ -f "${WORKSPACE_DIR}/out/.last_build.log" ]]; then
+            tail -n 200 "${WORKSPACE_DIR}/out/.last_build.log"
+        else
+            echo "Terminal compilation log out/.last_build.log not found."
+        fi
+        echo ""
+        echo "================================================================================"
+        echo "                          END OF DIAGNOSTIC REPORT                              "
+        echo "================================================================================"
+    } > "$FAILURE_LOG"
+
+    # Clear intermediate / fragmented log files and temp build folders after failure
+    rm -f "${WORKSPACE_DIR}/out/error.log" \
+          "${WORKSPACE_DIR}/out/soong.log" \
+          "${WORKSPACE_DIR}/out/.last_build.log" \
+          "${WORKSPACE_DIR}"/out/*.log \
+          "${WORKSPACE_DIR}"/out/soong/*.log \
+          "${WORKSPACE_DIR}"/out/soong/siso* 2>/dev/null || true
+    rm -rf "${WORKSPACE_DIR}/out/soong/.bootstrap" \
+           "${WORKSPACE_DIR}/out/soong/build."*".ninja" \
+           "${WORKSPACE_DIR}/out/soong/.temp" 2>/dev/null || true
+
+    printf "\033[0;32m[✓]\033[0m Consolidated failure log saved to: \033[1m%s\033[0m\n" "$FAILURE_LOG"
+    printf "\033[0;34m==>\033[0m Intermediate log files and temp build folders in out/ have been cleaned.\n"
+
+    # Display concise failure summary directly in console
+    if [[ -f "$FAILURE_LOG" ]]; then
+        printf "\n\033[1;33m--- Consolidated Diagnostic Summary ---\033[0m\n"
+        tail -n 25 "$FAILURE_LOG"
+        printf "\033[1;33m---------------------------------------\033[0m\n\n"
+    fi
+}
+
+record_failure() {
+    local rc="$1"
+    local line="$2"
+    local cmd="$3"
+    if [[ "$BUILD_SUCCESS" != "true" ]]; then
+        LAST_ERROR_MSG="Command '${cmd}' failed on line ${line} with exit code ${rc}"
+        collect_failure_logs "$rc" "$line" "$cmd"
+        exit "$rc"
+    fi
+}
+
+trap 'record_failure $? $LINENO "$BASH_COMMAND"' ERR
 
 install_dependencies() {
     info "Installing system build packages and toolchain dependencies..."
@@ -90,6 +267,9 @@ install_dependencies() {
 check_requirements() {
     info "Checking local system requirements..."
     cd "$WORKSPACE_DIR" || die "Directory $WORKSPACE_DIR not found"
+
+    # Clean any stale failure log and previous build capture stream
+    rm -f "${FAILURE_LOG}" "${WORKSPACE_DIR}/out/.last_build.log" 2>/dev/null || true
 
     # Deactivate Python virtual environment if active to avoid build tool conflicts
     if [[ -n "$VIRTUAL_ENV" ]] && command -v deactivate >/dev/null 2>&1; then
@@ -394,16 +574,25 @@ setup_gcam() {
 build_target() {
     info "Starting build for ${DEVICE_CODENAME}..."
 
+    mkdir -p "${WORKSPACE_DIR}/out"
+
     set +e
     # shellcheck source=/dev/null
     source build/envsetup.sh
-    breakfast "${DEVICE_CODENAME}"
-    local rc=$?
+    breakfast "${DEVICE_CODENAME}" 2>&1 | tee -a "${WORKSPACE_DIR}/out/.last_build.log"
+    local rc=${PIPESTATUS[0]}
     set -e
     [[ $rc -eq 0 ]] || die "breakfast ${DEVICE_CODENAME} failed"
 
     info "Compiling m pixelos..."
-    m pixelos || die "Build failed! Check out/error.log"
+    set +e
+    m pixelos 2>&1 | tee -a "${WORKSPACE_DIR}/out/.last_build.log"
+    local build_rc=${PIPESTATUS[0]}
+    set -e
+    [[ $build_rc -eq 0 ]] || die "Build failed! Check ${FAILURE_LOG}"
+
+    BUILD_SUCCESS=true
+    rm -f "${WORKSPACE_DIR}/out/.last_build.log" "${FAILURE_LOG}" 2>/dev/null || true
 
     info "Build completed successfully!"
     local out_zip
@@ -421,9 +610,9 @@ upload_artifacts() {
     if [[ "$AUTO_UPLOAD" == "true" ]]; then
         info "Uploading build artifact to Pixeldrain..."
         if [[ -f "upload_to_pixeldrain.sh" ]]; then
-            bash upload_to_pixeldrain.sh
+            bash upload_to_pixeldrain.sh || warn "Artifact upload failed, but build succeeded."
         else
-            curl -fsSL "https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/upload_to_pixeldrain.sh" | bash
+            curl -fsSL "https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/upload_to_pixeldrain.sh" | bash || warn "Artifact upload failed, but build succeeded."
         fi
     else
         info "Auto-upload skipped (--no-upload)."
