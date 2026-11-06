@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # PixelOS A17 Local Build Script for sweet2 (Redmi Note 12 Pro)
-# Works on any Linux machine (Ubuntu / Debian / WSL2)
+# Works on any Linux machine (Ubuntu / Debian / WSL2 / Docker)
 # Includes automatic dependency installation, swap setup, and Pixeldrain upload
 # Maintainer: rony1duet
 #
@@ -40,20 +40,43 @@ install_dependencies() {
     info "Installing system build packages and toolchain dependencies..."
 
     if command -v apt-get >/dev/null 2>&1; then
-        sudo apt-get update -y
-        sudo apt-get install -y \
-            bc bison build-essential ccache curl flex g++-multilib gcc-multilib git \
-            git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev libelf-dev \
-            liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 \
-            libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip \
-            zlib1g-dev python3 python-is-python3 libtinfo5 openjdk-17-jdk file pkg-config
+        sudo apt-get update -y || true
+
+        # Modern package list compatible with Ubuntu 20.04, 22.04, 24.04, 24.10, and newer
+        local pkgs=(
+            bc bison build-essential ccache curl flex g++-multilib gcc-multilib git
+            git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev libelf-dev
+            libncurses-dev libssl-dev libxml2-utils lz4 liblz4-dev lzop pngcrush rsync
+            schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python-is-python3
+            openjdk-17-jdk file pkg-config
+        )
+
+        local to_install=()
+        for pkg in "${pkgs[@]}"; do
+            if apt-cache policy "$pkg" 2>/dev/null | grep -q 'Candidate: [^(\n]'; then
+                to_install+=("$pkg")
+            fi
+        done
+
+        if [[ ${#to_install[@]} -gt 0 ]]; then
+            sudo apt-get install -y "${to_install[@]}" || {
+                warn "Batch install encountered issues; attempting individual package installs..."
+                for p in "${to_install[@]}"; do
+                    sudo apt-get install -y "$p" 2>/dev/null || true
+                done
+            }
+        fi
     fi
 
     if ! command -v repo >/dev/null 2>&1; then
         info "Installing Google repo tool..."
-        sudo curl -s https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo || \
-            (mkdir -p "$HOME/.local/bin" && curl -s https://storage.googleapis.com/git-repo-downloads/repo -o "$HOME/.local/bin/repo" && chmod a+rx "$HOME/.local/bin/repo")
-        sudo chmod a+rx /usr/local/bin/repo 2>/dev/null || true
+        if sudo curl -s https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo 2>/dev/null; then
+            sudo chmod a+rx /usr/local/bin/repo
+        else
+            mkdir -p "$HOME/.local/bin"
+            curl -s https://storage.googleapis.com/git-repo-downloads/repo -o "$HOME/.local/bin/repo"
+            chmod a+rx "$HOME/.local/bin/repo"
+        fi
     fi
 
     export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
@@ -92,15 +115,22 @@ check_requirements() {
     [[ -f /proc/meminfo ]] && total_swap_kb=$(grep SwapTotal /proc/meminfo | awk '{print $2}')
     local total_mem_gb=$(( (total_ram_kb + total_swap_kb) / 1024 / 1024 ))
 
+    local is_container=false
+    if [[ -f /.dockerenv ]] || grep -qa 'container=docker' /proc/1/environ 2>/dev/null; then
+        is_container=true
+    fi
+
     if [[ "$total_mem_gb" -gt 0 ]]; then
         info "Total memory available (RAM + Swap): ${total_mem_gb}GB"
         if [[ "$total_mem_gb" -lt 24 ]]; then
             warn "Total memory (RAM + Swap) is under 24GB. The build may get killed by OOM killer during link phases."
-            if [[ "$INSTALL_DEPS" == "true" ]] && ! swapon --show | grep -q "/swapfile"; then
+            if [[ "$is_container" == "true" ]]; then
+                info "Running inside a container; allocate additional RAM/swap on host if build is OOM killed."
+            elif [[ "$INSTALL_DEPS" == "true" ]] && ! swapon --show 2>/dev/null | grep -q "/swapfile"; then
                 info "Auto-provisioning 16GB /swapfile..."
                 sudo fallocate -l 16G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=16384 status=progress
                 sudo chmod 600 /swapfile
-                sudo mkswap /swapfile
+                sudo mkswap /swapfile 2>/dev/null || true
                 sudo swapon /swapfile 2>/dev/null || true
             else
                 warn "To add a 16GB swap file, run: sudo fallocate -l 16G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile"
@@ -157,6 +187,7 @@ sanitize_configs() {
 setup_environment() {
     info "Exporting local build environment..."
 
+    export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
     export BUILD_USERNAME="${USER:-rony1duet}"
     export BUILD_HOSTNAME="${HOSTNAME:-local}"
     export BUILD_BROKEN_MISSING_REQUIRED_MODULES=true
