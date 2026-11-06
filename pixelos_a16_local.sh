@@ -91,10 +91,29 @@ check_requirements() {
     info "Checking local system requirements..."
     cd "$WORKSPACE_DIR" || die "Directory $WORKSPACE_DIR not found"
 
+    # Deactivate Python virtual environment if active to avoid build tool conflicts
+    if [[ -n "$VIRTUAL_ENV" ]] && command -v deactivate >/dev/null 2>&1; then
+        deactivate 2>/dev/null || true
+    fi
+
+    # Ensure Git global identity and safe repository ownership
+    if [[ -z "$(git config --global user.name 2>/dev/null)" ]]; then
+        git config --global user.name "rony1duet"
+    fi
+    if [[ -z "$(git config --global user.email 2>/dev/null)" ]]; then
+        git config --global user.email "rony.hossen.duet@gmail.com"
+    fi
+    git config --global --add safe.directory "*" 2>/dev/null || true
+
     export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 
     if [[ "$INSTALL_DEPS" == "true" ]] || ! command -v repo >/dev/null 2>&1 || ! command -v git-lfs >/dev/null 2>&1; then
         install_dependencies
+    fi
+
+    # Ensure python symlink exists for legacy build scripts
+    if ! command -v python >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+        sudo ln -sf "$(command -v python3)" /usr/local/bin/python 2>/dev/null || true
     fi
 
     local missing_tools=()
