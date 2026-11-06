@@ -182,10 +182,55 @@ sync_sources() {
     done
 }
 
+sync_device_repos() {
+    info "Updating device repositories and build/soong..."
+
+    local repos=(
+        device/xiaomi/sm6150-common
+        device/xiaomi/sweet2
+        kernel/xiaomi/sm6150
+        hardware/xiaomi
+        hardware/dolby
+        vendor/xiaomi/sm6150-common
+        vendor/xiaomi/sweet2
+        vendor/android_prebuilts_sweet2
+        vendor/GCam_sweet2
+        build/soong
+    )
+
+    for repo in "${repos[@]}"; do
+        if [[ -d "$repo/.git" ]]; then
+            local branch="${DEVICE_BRANCH}"
+            if [[ "$repo" == "build/soong" ]]; then
+                branch="${ROM_MANIFEST_BRANCH}"
+            fi
+            git -C "$repo" fetch origin "$branch" --depth=1 2>/dev/null || true
+            git -C "$repo" reset --hard "origin/$branch" 2>/dev/null || true
+            echo "  -> $repo: $(git -C "$repo" log -1 --oneline 2>/dev/null)"
+        fi
+    done
+}
+
 setup_toolchain() {
-    info "Validating toolchains and Git LFS..."
+    info "Validating build/soong, toolchains, and Git LFS..."
+
+    if [[ ! -f "build/soong/soong_ui.bash" ]]; then
+        info "Syncing build/soong..."
+        repo sync -c -j4 --force-sync build/soong
+    fi
+    [[ -f "build/soong/soong_ui.bash" ]] || die "Missing build/soong/soong_ui.bash"
+
     git lfs install 2>/dev/null || true
     repo forall -r "prebuilts/.*" -c "git lfs pull" 2>/dev/null || true
+
+    local clang_bin
+    clang_bin=$(find prebuilts/clang/host/linux-x86 -type f -name "clang" 2>/dev/null | head -n 1)
+    if [[ -n "$clang_bin" && "$(file "$clang_bin" 2>/dev/null)" == *"ASCII text"* ]]; then
+        warn "Healing unexpanded Clang LFS pointer..."
+        rm -rf prebuilts/clang/host/linux-x86
+        repo sync -c -j4 --force-sync prebuilts/clang/host/linux-x86
+        (cd prebuilts/clang/host/linux-x86 && git lfs pull) 2>/dev/null || true
+    fi
 
     find prebuilts/ -type f \( -name "clang*" -o -name "lld*" -o -name "llvm-*" \) -exec chmod +x {} + 2>/dev/null || true
 }
@@ -291,6 +336,7 @@ main() {
     check_requirements
     setup_manifests
     sync_sources
+    sync_device_repos
     setup_toolchain
     sanitize_configs
     setup_environment
