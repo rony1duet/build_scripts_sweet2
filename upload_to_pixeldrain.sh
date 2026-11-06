@@ -6,16 +6,10 @@
 
 set -Eeuo pipefail
 
-# -----------------------------------------------------------------------------
-# Configuration
-# -----------------------------------------------------------------------------
 readonly PIXELDRAIN_API_KEY="026168ac-08ec-4bdb-9dde-99c7635200b0"
 readonly PIXELDRAIN_API_URL="https://pixeldrain.com/api/file/"
 readonly ROM_DIR="out/target/product/sweet2"
 
-# -----------------------------------------------------------------------------
-# Logging Helpers
-# -----------------------------------------------------------------------------
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
@@ -28,20 +22,14 @@ log_warn()  { printf "${YELLOW}[WARN]${NC} %s\n" "$*"; }
 log_error() { printf "${RED}[ERROR]${NC} %s\n" "$*" >&2; }
 die()       { log_error "$*"; exit 1; }
 
-# -----------------------------------------------------------------------------
-# Dependency Validation
-# -----------------------------------------------------------------------------
 check_dependencies() {
-    command -v curl >/dev/null 2>&1 || die "curl is required but not installed."
-    command -v python3 >/dev/null 2>&1 || die "python3 is required but not installed."
+    command -v curl >/dev/null 2>&1 || die "curl is required"
+    command -v python3 >/dev/null 2>&1 || die "python3 is required"
 
-    [[ -n "$PIXELDRAIN_API_KEY" ]] || die "Pixeldrain API key is empty."
+    [[ -n "$PIXELDRAIN_API_KEY" ]] || die "Pixeldrain API key is empty"
     [[ -d "$ROM_DIR" ]] || die "ROM directory not found: $ROM_DIR"
 }
 
-# -----------------------------------------------------------------------------
-# Target Selection
-# -----------------------------------------------------------------------------
 find_rom_zip() {
     shopt -s nullglob
     local candidates=(
@@ -75,13 +63,10 @@ find_rom_zip() {
         fi
     done
 
-    [[ -f "$newest" ]] || die "Failed to resolve target ROM zip."
+    [[ -f "$newest" ]] || die "Target ROM zip resolution failed"
     printf "%s" "$newest"
 }
 
-# -----------------------------------------------------------------------------
-# Upload Execution
-# -----------------------------------------------------------------------------
 upload_file() {
     local rom_zip="$1"
     local filename="$2"
@@ -112,9 +97,6 @@ upload_file() {
     printf "%s" "$http_code"
 }
 
-# -----------------------------------------------------------------------------
-# Response Parsing
-# -----------------------------------------------------------------------------
 parse_file_id() {
     local response_file="$1"
 
@@ -134,13 +116,10 @@ except (OSError, json.JSONDecodeError):
 PY
     )"
 
-    [[ -n "$file_id" ]] || die "Upload response did not contain a valid file ID."
+    [[ -n "$file_id" ]] || die "Upload response did not return a valid file ID"
     printf "%s" "$file_id"
 }
 
-# -----------------------------------------------------------------------------
-# Metadata Serialization
-# -----------------------------------------------------------------------------
 save_build_metadata() {
     local filename="$1"
     local size="$2"
@@ -175,9 +154,6 @@ PY
     printf "%s" "$info_path"
 }
 
-# -----------------------------------------------------------------------------
-# Main Entry Point
-# -----------------------------------------------------------------------------
 main() {
     check_dependencies
 
@@ -193,8 +169,8 @@ main() {
     local human_size
     human_size="$(du -h "$rom_zip" | cut -f1)"
 
-    log_info "Selected ROM target : $original_filename"
-    log_info "Archive file size   : $human_size"
+    log_info "Target ROM : $original_filename"
+    log_info "Size       : $human_size"
 
     local response_file
     response_file="$(mktemp)"
@@ -202,7 +178,7 @@ main() {
 
     local http_status
     http_status="$(upload_file "$rom_zip" "$original_filename" "$response_file")"
-    log_info "HTTP response status: $http_status"
+    log_info "HTTP Status: $http_status"
 
     local file_id
     file_id="$(parse_file_id "$response_file")"
@@ -226,13 +202,12 @@ main() {
     printf 'Metadata JSON   : %s\n' "$info_file"
     printf '%s\n' "============================================"
 
-    # Structured CI/CD export
     printf 'PIXELDRAIN_FILE_ID=%s\n' "$file_id"
     printf 'PIXELDRAIN_URL=%s\n' "$file_url"
     printf 'PIXELDRAIN_DIRECT_URL=%s\n' "$direct_url"
     printf 'PIXELDRAIN_FILENAME=%s\n' "$original_filename"
 
-    log_info "Release dispatch complete."
+    log_info "Done."
 }
 
 main "$@"
