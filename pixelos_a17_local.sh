@@ -267,14 +267,14 @@ setup_environment() {
         ccache -M 50G >/dev/null 2>&1 || true
     fi
 
-    # Check for container cgroup memory limits to prevent soong_build exit 137 OOM kills
-    local is_container=false
-    local container_mem_gb=0
-
-    if [[ -f /.dockerenv ]] || grep -qa 'container=docker' /proc/1/environ 2>/dev/null; then
-        is_container=true
+    # Disable systemd-oomd if running, as it kills soong_build during high I/O memory stalls
+    if command -v systemctl >/dev/null 2>&1; then
+        sudo systemctl stop systemd-oomd 2>/dev/null || true
+        sudo systemctl disable systemd-oomd 2>/dev/null || true
     fi
 
+    # Check for container cgroup memory limits to calculate effective RAM
+    local container_mem_gb=0
     if [[ -f /sys/fs/cgroup/memory.max ]]; then
         local max_bytes
         max_bytes=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo "max")
@@ -289,41 +289,48 @@ setup_environment() {
         fi
     fi
 
-    if [[ "$container_mem_gb" -gt 0 && "$container_mem_gb" -le 16 ]]; then
+    local ram_gb=16
+    if [[ -f /proc/meminfo ]]; then
+        ram_gb=$(awk '/MemTotal/{print int($2/1024/1024)}' /proc/meminfo)
+    fi
+
+    local effective_ram_gb="$ram_gb"
+    if [[ "$container_mem_gb" -gt 0 ]]; then
+        effective_ram_gb="$container_mem_gb"
+    fi
+
+    info "Tuning Go runtime for ${effective_ram_gb}GB effective RAM..."
+
+    if [[ "$effective_ram_gb" -ge 256 ]]; then
+        export GOMEMLIMIT="64GiB"
+        export GOGC=100
+        export SOONG_GOGC=100
+        export GOMAXPROCS=32
+    elif [[ "$effective_ram_gb" -ge 128 ]]; then
+        export GOMEMLIMIT="48GiB"
+        export GOGC=80
+        export SOONG_GOGC=80
+        export GOMAXPROCS=24
+    elif [[ "$effective_ram_gb" -ge 64 ]]; then
+        export GOMEMLIMIT="32GiB"
+        export GOGC=60
+        export SOONG_GOGC=60
+        export GOMAXPROCS=16
+    elif [[ "$effective_ram_gb" -ge 32 ]]; then
+        export GOMEMLIMIT="20GiB"
+        export GOGC=40
+        export SOONG_GOGC=40
+        export GOMAXPROCS=12
+    elif [[ "$effective_ram_gb" -ge 16 ]]; then
+        export GOMEMLIMIT="12GiB"
+        export GOGC=30
+        export SOONG_GOGC=30
+        export GOMAXPROCS=8
+    else
         export GOMEMLIMIT="8GiB"
         export GOGC=25
         export SOONG_GOGC=25
-        export GOMAXPROCS=8
-    elif [[ "$container_mem_gb" -gt 16 && "$container_mem_gb" -le 32 ]]; then
-        export GOMEMLIMIT="14GiB"
-        export GOGC=30
-        export SOONG_GOGC=30
-        export GOMAXPROCS=12
-    elif [[ "$is_container" == "true" ]]; then
-        # Inside container with unconstrained host meminfo, cap to safe limit
-        export GOMEMLIMIT="10GiB"
-        export GOGC=25
-        export SOONG_GOGC=25
-        export GOMAXPROCS=8
-    else
-        # Native host Linux machine
-        local ram_gb=16
-        if [[ -f /proc/meminfo ]]; then
-            ram_gb=$(awk '/MemTotal/{print int($2/1024/1024)}' /proc/meminfo)
-        fi
-        if [[ "$ram_gb" -ge 48 ]]; then
-            export GOMEMLIMIT="20GiB"
-            export GOGC=35
-            export SOONG_GOGC=35
-        elif [[ "$ram_gb" -ge 24 ]]; then
-            export GOMEMLIMIT="14GiB"
-            export GOGC=30
-            export SOONG_GOGC=30
-        else
-            export GOMEMLIMIT="8GiB"
-            export GOGC=25
-            export SOONG_GOGC=25
-        fi
+        export GOMAXPROCS=4
     fi
 
     export MALLOC_ARENA_MAX=2
