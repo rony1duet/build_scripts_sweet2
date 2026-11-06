@@ -8,7 +8,7 @@
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.3.3"
+readonly SCRIPT_VERSION="1.3.4"
 readonly ROM_NAME="PixelOS"
 readonly ROM_MANIFEST_BRANCH="seventeen"
 readonly DEVICE_BRANCH="PixelOS-17-base"
@@ -581,10 +581,13 @@ setup_environment() {
     if [[ "$is_container" == "true" || "$host_swap_gb" -eq 0 ]]; then
         info "Constrained container / zero-swap environment detected (Container: ${is_container}, Swap: ${host_swap_gb}GB)."
         info "Allocating safe memory parameters to prevent OOM killer..."
-        export GOMEMLIMIT="3000MiB"
-        export GOGC=40
-        export SOONG_GOGC=40
-        export GOMAXPROCS=8
+        # Do NOT set GOMEMLIMIT in zero-swap containers: soong_build needs ~5-6 GB live heap
+        # and an artificial ceiling below that causes GC thrashing which triggers the OOM killer.
+        # Instead, reduce goroutine parallelism to keep peak RSS below the natural ceiling.
+        unset GOMEMLIMIT
+        export GOGC=50
+        export SOONG_GOGC=50
+        export GOMAXPROCS=4
         export NINJA_HIGHMEM_NUM_JOBS=1
     elif [[ "$effective_ram_gb" -ge 64 ]]; then
         # Dedicated large server / VM (e.g. 755GB EPYC or 62.7GB Ryzen) with active swap
