@@ -1,40 +1,32 @@
-# PixelOS 16 Build Scripts (`sweet2`)
+# PixelOS Build Scripts for sweet2
 
-Automated build and packaging scripts for compiling **PixelOS 16.2 (Android 16 QPR2)** on **Redmi Note 12 Pro 4G (`sweet2`)** via [Crave](https://crave.io) or local build servers.
+Automated build and packaging scripts for compiling PixelOS on Redmi Note 12 Pro 4G (`sweet2`) via Crave.
 
----
+## Quick Start (Crave)
 
-## 📋 Full Documentation & Release Changelog
-
-The complete ROM release changelog and architecture documentation are maintained on the **main** branch:
-👉 **[View Official Release Changelog](https://github.com/rony1duet/build_scripts_sweet2/blob/main/CHANGELOG.md)**
-
----
-
-## 🚀 Quick Start on Crave
-
-To compile PixelOS 16.2 for sweet2:
+To run a build on Crave:
 
 ```bash
-crave run --no-patch -- "bash <(curl -sL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/PixelOS-16-QPR2/pixelos_a16.sh)"
+# Android 17 (PixelOS-17-base)
+crave run --no-patch -- "curl -sL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a17.sh | bash"
+
+# Android 16 (PixelOS-16-QPR2)
+crave run --no-patch -- "curl -sL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/PixelOS-16-QPR2/pixelos_a16.sh | bash"
 ```
 
----
+## What the Scripts Do
 
-## 💻 Local Build Server Usage
+1. **Manifest Setup:** Inits ROM manifest and configures `sweet2.xml` from `manifest_sweet2`.
+2. **Device Trees Sync:** Updates device, vendor, hardware, and kernel trees to latest branch HEAD.
+3. **Toolchain Check:** Validates Git LFS toolchains and heals unexpanded Clang pointer files if needed.
+4. **Intermediate Cleanup:** Purges test suites, unneeded debug symbols, and conflicting module targets while preserving incremental compilation objects.
+5. **GCam Prebuilt:** Prepares Google Camera prebuilts with local caching and SHA-256 verification.
+6. **Compilation:** Executes `breakfast sweet2` and builds `pixelos`.
+7. **Upload:** Dispatches the completed ROM zip to Pixeldrain and prints the direct download link.
 
-For dedicated Linux servers with local drive mounts:
+## Branches
 
-```bash
-chmod +x pixelos_a16_local.sh
-bash pixelos_a16_local.sh
-```
+- `main` / `PixelOS-17-base`: Android 17 builds
+- `PixelOS-16-QPR2`: Android 16 QPR2 builds
 
----
-
-## 🛠️ Script Capabilities
-
-[`pixelos_a16.sh`](./pixelos_a16.sh) automates the full build lifecycle:
-1. **Manifest Setup:** Clones and configures `sweet2.xml` from [`manifest_sweet2`](https://github.com/rony1duet/manifest_sweet2) (`PixelOS-16-QPR2`).
-2. **Repository Sync:** Resets and synchronizes all device trees and vendor repositories.
-3. **Pixeldrain Upload:** Automatically packages and uploads the ROM zip via [`upload_to_pixeldrain.sh`](./upload_to_pixeldrain.sh).
+Changelog and device details are available in [CHANGELOG.md](CHANGELOG.md).
