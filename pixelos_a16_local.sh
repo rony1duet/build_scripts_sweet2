@@ -370,9 +370,20 @@ setup_environment() {
         sudo rm -f /swapfile 2>/dev/null || true
     fi
 
-    if [[ "$effective_ram_gb" -ge 64 ]]; then
-        # Workstation / Server (EPYC or Ryzen)
-        # Cap to 24GiB memory and 16 workers to keep AST heap tight and prevent container OOM kills
+    local is_container=false
+    if [[ -f /.dockerenv ]] || grep -qa 'container=docker' /proc/1/environ 2>/dev/null; then
+        is_container=true
+    fi
+
+    if [[ "$is_container" == "true" ]]; then
+        # Inside Docker container with 0 swap, cap strictly to safe envelope to prevent cgroup OOM
+        info "Container environment detected with no swap. Enforcing safe 10GiB memory boundary..."
+        export GOMEMLIMIT="10GiB"
+        export GOGC=25
+        export SOONG_GOGC=25
+        export GOMAXPROCS=4
+    elif [[ "$effective_ram_gb" -ge 64 ]]; then
+        # Dedicated bare-metal server / VM (e.g. 62.7GB Ryzen VM)
         export GOMEMLIMIT="24GiB"
         export GOGC=75
         export SOONG_GOGC=75
