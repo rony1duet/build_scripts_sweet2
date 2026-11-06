@@ -231,7 +231,7 @@ sync_sources() {
 }
 
 sync_device_repos() {
-    info "Updating device repositories..."
+    info "Updating device repositories and build/soong..."
 
     local repos=(
         device/xiaomi/sm6150-common
@@ -243,19 +243,36 @@ sync_device_repos() {
         vendor/xiaomi/sweet2
         vendor/android_prebuilts_sweet2
         vendor/GCam_sweet2
+        build/soong
     )
 
     for repo in "${repos[@]}"; do
         if [[ -d "$repo/.git" ]]; then
-            git -C "$repo" fetch origin "${DEVICE_BRANCH}" --depth=1 2>/dev/null || true
-            git -C "$repo" reset --hard "origin/${DEVICE_BRANCH}" 2>/dev/null || true
+            local branch="${DEVICE_BRANCH}"
+            if [[ "$repo" == "build/soong" ]]; then
+                branch="${ROM_MANIFEST_BRANCH}"
+            fi
+            git -C "$repo" fetch origin "$branch" --depth=1 2>/dev/null || true
+            git -C "$repo" reset --hard "origin/$branch" 2>/dev/null || true
             echo "  -> $repo: $(git -C "$repo" log -1 --oneline 2>/dev/null)"
         fi
     done
 }
 
 setup_toolchain() {
-    info "Validating toolchains and Git LFS..."
+    info "Validating build/soong, toolchains, and Git LFS..."
+
+    if [[ ! -f "build/soong/soong_ui.bash" ]]; then
+        info "Syncing build/soong..."
+        repo sync -c -j4 --force-sync build/soong
+    fi
+    [[ -f "build/soong/soong_ui.bash" ]] || die "Missing build/soong/soong_ui.bash"
+
+    # Ensure build/soong passes through GOMEMLIMIT, GOGC, and GOMAXPROCS into the bootstrap environment
+    if [[ -f "build/soong/ui/build/soong.go" ]] && ! grep -q "GOMEMLIMIT" "build/soong/ui/build/soong.go"; then
+        info "Applying container memory pass-through patch to build/soong..."
+        sed -i '/invocationEnv := make(map\[string\]string)/a \\tfor _, envVar := range []string{"GOMEMLIMIT", "GOGC", "GODEBUG", "GOMAXPROCS"} {\n\t\tif val := os.Getenv(envVar); val != "" {\n\t\t\tinvocationEnv[envVar] = val\n\t\t}\n\t}' build/soong/ui/build/soong.go 2>/dev/null || true
+    fi
 
     git lfs install 2>/dev/null || true
     repo forall -r "prebuilts/.*" -c "git lfs pull" 2>/dev/null || true
