@@ -264,22 +264,66 @@ setup_environment() {
         ccache -M 50G >/dev/null 2>&1 || true
     fi
 
-    local ram_gb=16
-    if [[ -f /proc/meminfo ]]; then
-        ram_gb=$(awk '/MemTotal/{print int($2/1024/1024)}' /proc/meminfo)
+    # Check for container cgroup memory limits to prevent soong_build exit 137 OOM kills
+    local is_container=false
+    local container_mem_gb=0
+
+    if [[ -f /.dockerenv ]] || grep -qa 'container=docker' /proc/1/environ 2>/dev/null; then
+        is_container=true
     fi
 
-    if [[ "$ram_gb" -ge 30 ]]; then
-        export GOMEMLIMIT="24GiB"
-    elif [[ "$ram_gb" -ge 20 ]]; then
-        export GOMEMLIMIT="16GiB"
+    if [[ -f /sys/fs/cgroup/memory.max ]]; then
+        local max_bytes
+        max_bytes=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo "max")
+        if [[ "$max_bytes" =~ ^[0-9]+$ ]]; then
+            container_mem_gb=$(( max_bytes / 1024 / 1024 / 1024 ))
+        fi
+    elif [[ -f /sys/fs/cgroup/memory/memory.limit_in_bytes ]]; then
+        local max_bytes
+        max_bytes=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo "0")
+        if [[ "$max_bytes" =~ ^[0-9]+$ && "$max_bytes" -lt 9000000000000000000 ]]; then
+            container_mem_gb=$(( max_bytes / 1024 / 1024 / 1024 ))
+        fi
+    fi
+
+    if [[ "$container_mem_gb" -gt 0 && "$container_mem_gb" -le 16 ]]; then
+        export GOMEMLIMIT="8GiB"
+        export GOGC=25
+        export SOONG_GOGC=25
+        export GOMAXPROCS=8
+    elif [[ "$container_mem_gb" -gt 16 && "$container_mem_gb" -le 32 ]]; then
+        export GOMEMLIMIT="14GiB"
+        export GOGC=30
+        export SOONG_GOGC=30
+        export GOMAXPROCS=12
+    elif [[ "$is_container" == "true" ]]; then
+        # Inside container with unconstrained host meminfo, cap to safe limit
+        export GOMEMLIMIT="10GiB"
+        export GOGC=25
+        export SOONG_GOGC=25
+        export GOMAXPROCS=8
     else
-        export GOMEMLIMIT="12GiB"
+        # Native host Linux machine
+        local ram_gb=16
+        if [[ -f /proc/meminfo ]]; then
+            ram_gb=$(awk '/MemTotal/{print int($2/1024/1024)}' /proc/meminfo)
+        fi
+        if [[ "$ram_gb" -ge 48 ]]; then
+            export GOMEMLIMIT="20GiB"
+            export GOGC=35
+            export SOONG_GOGC=35
+        elif [[ "$ram_gb" -ge 24 ]]; then
+            export GOMEMLIMIT="14GiB"
+            export GOGC=30
+            export SOONG_GOGC=30
+        else
+            export GOMEMLIMIT="8GiB"
+            export GOGC=25
+            export SOONG_GOGC=25
+        fi
     fi
 
-    export GOGC=40
     export MALLOC_ARENA_MAX=2
-    export SOONG_GOGC=40
     export SOONG_INCREMENTAL_ANALYSIS=false
 }
 
