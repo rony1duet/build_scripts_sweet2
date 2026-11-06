@@ -348,22 +348,23 @@ setup_environment() {
 
     info "Allocating Go build parameters for ${effective_ram_gb}GB RAM system..."
 
-    if [[ "$effective_ram_gb" -ge 128 ]]; then
-        # High-spec workstation/server (755GB EPYC)
-        export GOMEMLIMIT="128GiB"
-        export GOGC=100
-        export SOONG_GOGC=100
-        export GOMAXPROCS=32
-    elif [[ "$effective_ram_gb" -ge 64 ]]; then
-        export GOMEMLIMIT="48GiB"
-        export GOGC=100
-        export SOONG_GOGC=100
-        export GOMAXPROCS=24
-    elif [[ "$effective_ram_gb" -ge 32 ]]; then
+    # Clean up dead unmounted swapfile to reclaim disk space
+    if [[ -f /swapfile ]] && ! swapon --show 2>/dev/null | grep -q "/swapfile"; then
+        sudo rm -f /swapfile 2>/dev/null || true
+    fi
+
+    if [[ "$effective_ram_gb" -ge 64 ]]; then
+        # Workstation / Server (EPYC or Ryzen)
+        # Cap to 24GiB memory and 16 workers to keep AST heap tight and prevent container OOM kills
         export GOMEMLIMIT="24GiB"
-        export GOGC=80
-        export SOONG_GOGC=80
+        export GOGC=75
+        export SOONG_GOGC=75
         export GOMAXPROCS=16
+    elif [[ "$effective_ram_gb" -ge 32 ]]; then
+        export GOMEMLIMIT="20GiB"
+        export GOGC=70
+        export SOONG_GOGC=70
+        export GOMAXPROCS=12
     elif [[ "$effective_ram_gb" -ge 16 ]]; then
         export GOMEMLIMIT="12GiB"
         export GOGC=50
