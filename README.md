@@ -38,19 +38,38 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 
 ## Quick Start
 
-### 1. Local Machine Build (Ubuntu / Debian / WSL2)
+### 1. Local Machine Build (Ubuntu / Debian / WSL2 / Docker)
 
-Inside your build workspace directory (`mkdir -p ~/pixelos-a17 && cd ~/pixelos-a17`):
+Inside your build workspace directory:
 
+#### Android 16 (PixelOS-16-QPR2):
 ```bash
-# Android 17 (PixelOS-17-base) - with auto-upload to Pixeldrain
-curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a17_local.sh | bash
+# Create and enter workspace directory
+mkdir -p ~/pixelos-a16 && cd ~/pixelos-a16
 
-# Auto-install missing system dependencies & swap before building:
-./pixelos_a17_local.sh --install-deps
+# Run build with auto-upload to Pixeldrain
+curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a16_local.sh | bash
+
+# With automatic dependency and toolchain installation:
+curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a16_local.sh | bash -s -- --install-deps
 
 # Build locally without uploading:
-./pixelos_a17_local.sh --no-upload
+curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a16_local.sh | bash -s -- --no-upload
+```
+
+#### Android 17 (PixelOS-17-base):
+```bash
+# Create and enter workspace directory
+mkdir -p ~/pixelos-a17 && cd ~/pixelos-a17
+
+# Run build with auto-upload to Pixeldrain
+curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a17_local.sh | bash
+
+# With automatic dependency and toolchain installation:
+curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a17_local.sh | bash -s -- --install-deps
+
+# Build locally without uploading:
+curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a17_local.sh | bash -s -- --no-upload
 ```
 
 The local script automatically validates disk space and RAM, configures ccache, sets safe memory limits, syncs sources, pulls prebuilts, compiles `m pixelos`, and uploads the final flashable zip to Pixeldrain.
