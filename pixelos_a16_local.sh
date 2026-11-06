@@ -8,7 +8,7 @@
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.3.1"
+readonly SCRIPT_VERSION="1.3.2"
 readonly ROM_NAME="PixelOS"
 readonly ROM_MANIFEST_URL="https://github.com/PixelOS-AOSP/android_manifest.git"
 readonly ROM_MANIFEST_BRANCH="sixteen-qpr2"
@@ -19,6 +19,7 @@ readonly DEVICE_CODENAME="sweet2"
 WORKSPACE_DIR="$(pwd)"
 AUTO_UPLOAD=true
 INSTALL_DEPS=false
+TARGET_RELEASE="${TARGET_RELEASE:-trunk_staging}"
 
 for arg in "$@"; do
     case "$arg" in
@@ -27,6 +28,9 @@ for arg in "$@"; do
             ;;
         --no-upload)
             AUTO_UPLOAD=false
+            ;;
+        --release=*|-r=*)
+            TARGET_RELEASE="${arg#*=}"
             ;;
         *)
             if [[ -d "$arg" ]]; then
@@ -448,10 +452,10 @@ setup_toolchain() {
     fi
     [[ -f "build/soong/soong_ui.bash" ]] || die "Missing build/soong/soong_ui.bash"
 
-    # Ensure build/soong passes through GOMEMLIMIT, GOGC, and GOMAXPROCS into the bootstrap environment
+    # Ensure build/soong passes through GOMEMLIMIT, GOGC, GOMAXPROCS, and TARGET_RELEASE into the bootstrap environment
     if [[ -f "build/soong/ui/build/soong.go" ]] && ! grep -q "GOMEMLIMIT" "build/soong/ui/build/soong.go"; then
         info "Applying container memory pass-through patch to build/soong..."
-        sed -i '/invocationEnv := make(map\[string\]string)/a \\tfor _, envVar := range []string{"GOMEMLIMIT", "GOGC", "GODEBUG", "GOMAXPROCS"} {\n\t\tif val := os.Getenv(envVar); val != "" {\n\t\t\tinvocationEnv[envVar] = val\n\t\t}\n\t}' build/soong/ui/build/soong.go 2>/dev/null || true
+        sed -i '/invocationEnv := make(map\[string\]string)/a \\tfor _, envVar := range []string{"GOMEMLIMIT", "GOGC", "GODEBUG", "GOMAXPROCS", "TARGET_RELEASE"} {\n\t\tif val := os.Getenv(envVar); val != "" {\n\t\t\tinvocationEnv[envVar] = val\n\t\t}\n\t}' build/soong/ui/build/soong.go 2>/dev/null || true
     fi
 
     git lfs install 2>/dev/null || true
@@ -493,6 +497,7 @@ setup_environment() {
     export DONT_INSTALL_DEXPREOPT_TESTS=true
     export SKIP_BOOT_JARS_CHECK=true
     export WITHOUT_CHECK_API=true
+    export TARGET_RELEASE="${TARGET_RELEASE:-trunk_staging}"
 
     # Use standard battle-tested Ninja instead of Siso to eliminate memory stall watcher kills
     export SOONG_NINJA=ninja
@@ -605,13 +610,27 @@ build_target() {
 
     mkdir -p "${WORKSPACE_DIR}/out"
 
+    export TARGET_RELEASE="${TARGET_RELEASE:-trunk_staging}"
+    export TARGET_PRODUCT="custom_${DEVICE_CODENAME}"
+    export TARGET_BUILD_VARIANT="userdebug"
+
     set +e
     # shellcheck source=/dev/null
     source build/envsetup.sh
-    breakfast "${DEVICE_CODENAME}" 2>&1 | tee -a "${WORKSPACE_DIR}/out/.last_build.log"
+
+    info "Configuring build target (${TARGET_PRODUCT}-${TARGET_RELEASE}-${TARGET_BUILD_VARIANT})..."
+    lunch "${TARGET_PRODUCT}-${TARGET_RELEASE}-${TARGET_BUILD_VARIANT}" 2>&1 | tee -a "${WORKSPACE_DIR}/out/.last_build.log"
     local rc=${PIPESTATUS[0]}
+    if [[ $rc -ne 0 ]]; then
+        warn "Direct 3-part lunch encountered an issue; falling back to breakfast ${DEVICE_CODENAME}..."
+        breakfast "${DEVICE_CODENAME}" 2>&1 | tee -a "${WORKSPACE_DIR}/out/.last_build.log"
+        rc=${PIPESTATUS[0]}
+    fi
     set -e
-    [[ $rc -eq 0 ]] || die "breakfast ${DEVICE_CODENAME} failed"
+    [[ $rc -eq 0 ]] || die "Target configuration failed for ${DEVICE_CODENAME}"
+
+    # Ensure TARGET_RELEASE is explicitly exported for Soong and Kati dumpvars
+    export TARGET_RELEASE="${TARGET_RELEASE:-trunk_staging}"
 
     info "Compiling m pixelos..."
     set +e
