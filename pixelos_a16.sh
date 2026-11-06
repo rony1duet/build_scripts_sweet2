@@ -166,8 +166,6 @@ if [ -d "kernel/xiaomi/sm6150" ]; then
 fi
 
 # Clean up partial intermediate objects from previous aborted runs
-CLEAN_BUILD="${CLEAN_BUILD:-true}"
-
 echo "==========================================="
 echo "Cleaning storage and preparing build environment..."
 echo "==========================================="
@@ -183,44 +181,38 @@ echo "Cleaning temporary build files..."
 sudo rm -rf /tmp/* /tmp/.* 2>/dev/null || rm -rf /tmp/* 2>/dev/null || true
 rm -rf out/soong/.temp 2>/dev/null || true
 
-# 3. Explicit clean (--clean): Wipe out directory to guarantee 100% clean storage
-if [ "$CLEAN_BUILD" = "true" ] || [ "$CLEAN_BUILD" = "1" ] || [ "${1:-}" = "--clean" ]; then
-    echo "Performing explicit clean (--clean): wiping out/ directory to maximize disk space..."
-    rm -rf out 2>/dev/null || true
-else
-    # Partial cleanup for incremental builds
-    echo "Incremental mode: purging unneeded test and symbol intermediates..."
-    rm -rf out/target/product/sweet2/symbols 2>/dev/null || true
-    rm -rf out/target/product/sweet2/data 2>/dev/null || true
-    rm -rf out/target/product/sweet2/testcases 2>/dev/null || true
-    rm -rf out/host/linux-x86/testcases 2>/dev/null || true
-    rm -rf out/dist 2>/dev/null || true
-    rm -rf out/soong/.intermediates/art 2>/dev/null || true
-    rm -rf out/soong/.intermediates/bionic 2>/dev/null || true
-    rm -rf out/target/product/sweet2/obj/KERNEL_OBJ 2>/dev/null || true
-    rm -rf out/target/product/sweet2/obj/PACKAGING/check_vintf* 2>/dev/null || true
-    rm -rf out/target/product/sweet2/obj/PACKAGING/privapp_permissions* 2>/dev/null || true
-    rm -rf out/target/product/sweet2/*/etc/vintf 2>/dev/null || true
-    rm -rf out/target/product/sweet2/etc/vintf 2>/dev/null || true
-    rm -f out/target/product/sweet2/system/etc/vintf/compatibility_matrix.device.xml 2>/dev/null || true
-    rm -rf out/target/product/sweet2/system_ext/etc/permissions 2>/dev/null || true
-    rm -f out/soong/.intermediates/frameworks/base/core/jni/libandroid_runtime/*/obj/frameworks/base/core/jni/android_os_SELinux.o 2>/dev/null || true
-    rm -f out/soong/.intermediates/system/sepolicy/tools/version_policy/*/obj/system/sepolicy/tools/version_policy.o 2>/dev/null || true
-    rm -rf out/soong/.intermediates/hardware/qcom/wlan/legacy/qcwcn/wifi_hal 2>/dev/null || true
-    rm -rf out/soong/.intermediates/frameworks/av/services/camera/libcameraservice 2>/dev/null || true
-    rm -rf out/soong/.intermediates/device/xiaomi/sm6150-common/camera 2>/dev/null || true
-    rm -rf out/soong/.intermediates/device/xiaomi/sm6150-common/parts 2>/dev/null || true
-    rm -rf out/target/product/sweet2/system_ext/priv-app/XiaomiParts 2>/dev/null || true
-    rm -f out/target/product/sweet2/system/bin/cameraserver 2>/dev/null || true
-    rm -rf out/target/product/sweet2/system/app/Stk out/target/product/sweet2/system/priv-app/Stk 2>/dev/null || true
-    rm -rf out/target/product/sweet2/system_ext/app/Aperture* out/target/product/sweet2/product/app/SafetyHub* out/target/product/sweet2/product/priv-app/SafetyHub* 2>/dev/null || true
-    rm -rf out/target/product/sweet2/system/app/FMRadio out/target/product/sweet2/system/app/FM2 out/target/product/sweet2/product/priv-app/EmergencyInfo 2>/dev/null || true
-    rm -rf out/target/product/sweet2/system/priv-app/GooglePartnerSetup* out/target/product/sweet2/product/priv-app/GooglePartnerSetup* 2>/dev/null || true
-    rm -rf out/target/product/sweet2/system/app/PlayAutoInstall* out/target/product/sweet2/product/app/PlayAutoInstall* 2>/dev/null || true
-    rm -rf out/soong/.intermediates/system/sepolicy/recovery_sepolicy.* out/soong/.intermediates/system/sepolicy/vendor_sepolicy.* 2>/dev/null || true
-    rm -rf out/soong/.intermediates/vendor/GCam_sweet2 2>/dev/null || true
-    rm -rf out/target/product/sweet2/product/app/GoogleCameraEng 2>/dev/null || true
-fi
+# 3. Partial cleanup for incremental builds: purge unneeded test, symbol, and conflicting intermediates
+echo "Incremental mode: purging unneeded test and symbol intermediates..."
+rm -rf out/target/product/sweet2/symbols 2>/dev/null || true
+rm -rf out/target/product/sweet2/data 2>/dev/null || true
+rm -rf out/target/product/sweet2/testcases 2>/dev/null || true
+rm -rf out/host/linux-x86/testcases 2>/dev/null || true
+rm -rf out/dist 2>/dev/null || true
+rm -rf out/soong/.intermediates/art 2>/dev/null || true
+rm -rf out/soong/.intermediates/bionic 2>/dev/null || true
+rm -rf out/target/product/sweet2/obj/KERNEL_OBJ 2>/dev/null || true
+rm -rf out/target/product/sweet2/obj/PACKAGING/check_vintf* 2>/dev/null || true
+rm -rf out/target/product/sweet2/obj/PACKAGING/privapp_permissions* 2>/dev/null || true
+rm -rf out/target/product/sweet2/*/etc/vintf 2>/dev/null || true
+rm -rf out/target/product/sweet2/etc/vintf 2>/dev/null || true
+rm -f out/target/product/sweet2/system/etc/vintf/compatibility_matrix.device.xml 2>/dev/null || true
+rm -rf out/target/product/sweet2/system_ext/etc/permissions 2>/dev/null || true
+rm -f out/soong/.intermediates/frameworks/base/core/jni/libandroid_runtime/*/obj/frameworks/base/core/jni/android_os_SELinux.o 2>/dev/null || true
+rm -f out/soong/.intermediates/system/sepolicy/tools/version_policy/*/obj/system/sepolicy/tools/version_policy.o 2>/dev/null || true
+rm -rf out/soong/.intermediates/hardware/qcom/wlan/legacy/qcwcn/wifi_hal 2>/dev/null || true
+rm -rf out/soong/.intermediates/frameworks/av/services/camera/libcameraservice 2>/dev/null || true
+rm -rf out/soong/.intermediates/device/xiaomi/sm6150-common/camera 2>/dev/null || true
+rm -rf out/soong/.intermediates/device/xiaomi/sm6150-common/parts 2>/dev/null || true
+rm -rf out/target/product/sweet2/system_ext/priv-app/XiaomiParts 2>/dev/null || true
+rm -f out/target/product/sweet2/system/bin/cameraserver 2>/dev/null || true
+rm -rf out/target/product/sweet2/system/app/Stk out/target/product/sweet2/system/priv-app/Stk 2>/dev/null || true
+rm -rf out/target/product/sweet2/system_ext/app/Aperture* out/target/product/sweet2/product/app/SafetyHub* out/target/product/sweet2/product/priv-app/SafetyHub* 2>/dev/null || true
+rm -rf out/target/product/sweet2/system/app/FMRadio out/target/product/sweet2/system/app/FM2 out/target/product/sweet2/product/priv-app/EmergencyInfo 2>/dev/null || true
+rm -rf out/target/product/sweet2/system/priv-app/GooglePartnerSetup* out/target/product/sweet2/product/priv-app/GooglePartnerSetup* 2>/dev/null || true
+rm -rf out/target/product/sweet2/system/app/PlayAutoInstall* out/target/product/sweet2/product/app/PlayAutoInstall* 2>/dev/null || true
+rm -rf out/soong/.intermediates/system/sepolicy/recovery_sepolicy.* out/soong/.intermediates/system/sepolicy/vendor_sepolicy.* 2>/dev/null || true
+rm -rf out/soong/.intermediates/vendor/GCam_sweet2 2>/dev/null || true
+rm -rf out/target/product/sweet2/product/app/GoogleCameraEng 2>/dev/null || true
 
 # 4. Prune Git LFS local blob cache across repositories (saves 20-30GB)
 echo "Pruning Git LFS object cache..."
