@@ -386,6 +386,12 @@ setup_manifests() {
         git -C .repo/local_manifests fetch origin "${DEVICE_BRANCH}" --depth=1 2>/dev/null || true
         git -C .repo/local_manifests reset --hard "origin/${DEVICE_BRANCH}" 2>/dev/null || true
     fi
+
+    # If build/soong was previously tracking a custom fork, reset it so repo sync cleanly restores official PixelOS build/soong
+    if [[ -d "build/soong/.git" ]] && git -C build/soong remote -v 2>/dev/null | grep -q "rony1duet"; then
+        info "Restoring official PixelOS-AOSP/android_build_soong..."
+        rm -rf build/soong .repo/projects/build/soong.git .repo/project-objects/*build_soong* 2>/dev/null || true
+    fi
 }
 
 sync_sources() {
@@ -413,7 +419,7 @@ sync_sources() {
 }
 
 sync_device_repos() {
-    info "Updating device repositories and build/soong..."
+    info "Updating device repositories..."
 
     local repos=(
         device/xiaomi/sm6150-common
@@ -425,17 +431,12 @@ sync_device_repos() {
         vendor/xiaomi/sweet2
         vendor/android_prebuilts_sweet2
         vendor/GCam_sweet2
-        build/soong
     )
 
     for repo in "${repos[@]}"; do
         if [[ -d "$repo/.git" ]]; then
-            local branch="${DEVICE_BRANCH}"
-            if [[ "$repo" == "build/soong" ]]; then
-                branch="${ROM_MANIFEST_BRANCH}"
-            fi
-            git -C "$repo" fetch origin "$branch" --depth=1 2>/dev/null || true
-            git -C "$repo" reset --hard "origin/$branch" 2>/dev/null || true
+            git -C "$repo" fetch origin "${DEVICE_BRANCH}" --depth=1 2>/dev/null || true
+            git -C "$repo" reset --hard "origin/${DEVICE_BRANCH}" 2>/dev/null || true
             echo "  -> $repo: $(git -C "$repo" log -1 --oneline 2>/dev/null)"
         fi
     done
@@ -445,10 +446,15 @@ setup_toolchain() {
     info "Validating build/soong, toolchains, and Git LFS..."
 
     if [[ ! -f "build/soong/soong_ui.bash" ]]; then
-        info "Syncing build/soong..."
+        info "Syncing official build/soong..."
         repo sync -c -j4 --force-sync build/soong
     fi
     [[ -f "build/soong/soong_ui.bash" ]] || die "Missing build/soong/soong_ui.bash"
+
+    # Ensure build/soong working tree is clean stock
+    if [[ -d "build/soong/.git" ]]; then
+        git -C build/soong checkout HEAD -- . 2>/dev/null || true
+    fi
 
     git lfs install 2>/dev/null || true
     repo forall -r "prebuilts/.*" -c "git lfs pull" 2>/dev/null || true
@@ -540,51 +546,30 @@ setup_environment() {
         fi
     fi
 
-    info "Allocating Go build parameters for ${effective_ram_gb}GB RAM system..."
+    info "Allocating build parameters for ${effective_ram_gb}GB RAM system..."
 
     # Clean up dead unmounted swapfile to reclaim disk space
     if [[ -f /swapfile ]] && ! swapon --show 2>/dev/null | grep -q "/swapfile"; then
         sudo rm -f /swapfile 2>/dev/null || true
     fi
 
-    local is_container=false
-    if [[ -f /.dockerenv ]] || grep -qa 'container=docker' /proc/1/environ 2>/dev/null; then
-        is_container=true
-    fi
-
-    if [[ "$is_container" == "true" && "$effective_ram_gb" -le 24 ]]; then
-        info "Constrained container environment detected (${effective_ram_gb}GB limit, ${host_swap_gb}GB swap). Enforcing safe 10GiB memory boundary..."
-        export GOMEMLIMIT="10GiB"
-        export GOGC=25
-        export SOONG_GOGC=25
-        export GOMAXPROCS=4
-    elif [[ "$is_container" == "true" && "$host_swap_gb" -eq 0 ]]; then
-        info "Container environment detected with no swap. Enforcing safe 10GiB memory boundary..."
-        export GOMEMLIMIT="10GiB"
-        export GOGC=25
-        export SOONG_GOGC=25
-        export GOMAXPROCS=4
-    elif [[ "$effective_ram_gb" -ge 64 ]]; then
-        # Dedicated bare-metal server / VM (e.g. 62.7GB Ryzen VM)
-        export GOMEMLIMIT="24GiB"
-        export GOGC=75
-        export SOONG_GOGC=75
-        export GOMAXPROCS=16
+    if [[ "$effective_ram_gb" -ge 64 ]]; then
+        # Dedicated large server / VM (e.g. 755GB EPYC or 62.7GB Ryzen)
+        export GOMEMLIMIT="32GiB"
+        export GOGC=100
+        export SOONG_GOGC=100
     elif [[ "$effective_ram_gb" -ge 32 ]]; then
         export GOMEMLIMIT="20GiB"
         export GOGC=70
         export SOONG_GOGC=70
-        export GOMAXPROCS=12
     elif [[ "$effective_ram_gb" -ge 16 ]]; then
         export GOMEMLIMIT="12GiB"
         export GOGC=50
         export SOONG_GOGC=50
-        export GOMAXPROCS=8
     else
         export GOMEMLIMIT="8GiB"
         export GOGC=30
         export SOONG_GOGC=30
-        export GOMAXPROCS=4
     fi
 
     # DO NOT set MALLOC_ARENA_MAX=2 on high-core systems to prevent thread lock contention
