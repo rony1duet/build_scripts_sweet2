@@ -11,11 +11,14 @@ Automated build and packaging scripts for compiling PixelOS on Redmi Note 12 Pro
 Inside your build workspace directory (`mkdir -p ~/pixelos-a17 && cd ~/pixelos-a17`):
 
 ```bash
-# Android 17 (PixelOS-17-base)
+# Android 17 (PixelOS-17-base) - with auto-upload to Pixeldrain
 curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a17_local.sh | bash
+
+# To build locally without uploading:
+./pixelos_a17_local.sh --no-upload
 ```
 
-The local script automatically validates disk space and RAM, configures ccache, sets safe memory limits, syncs sources, pulls prebuilts, compiles `m pixelos`, and outputs the artifact path without overwriting local swap or files.
+The local script automatically validates disk space and RAM, configures ccache, sets safe memory limits, syncs sources, pulls prebuilts, compiles `m pixelos`, and uploads the final flashable zip to Pixeldrain.
 
 ### 2. Cloud CI Build (Crave)
 

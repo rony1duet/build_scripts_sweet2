@@ -2,6 +2,7 @@
 #
 # PixelOS A17 Local Build Script for sweet2 (Redmi Note 12 Pro)
 # Works on any Linux machine (Ubuntu / Debian / WSL2)
+# Includes automatic upload to Pixeldrain upon build completion
 # Maintainer: rony1duet
 #
 
@@ -10,7 +11,22 @@ set -eo pipefail
 readonly ROM_MANIFEST_BRANCH="seventeen"
 readonly DEVICE_BRANCH="PixelOS-17-base"
 readonly DEVICE_CODENAME="sweet2"
-readonly WORKSPACE_DIR="${1:-$(pwd)}"
+
+WORKSPACE_DIR="$(pwd)"
+AUTO_UPLOAD=true
+
+for arg in "$@"; do
+    case "$arg" in
+        --no-upload)
+            AUTO_UPLOAD=false
+            ;;
+        *)
+            if [[ -d "$arg" ]]; then
+                WORKSPACE_DIR="$arg"
+            fi
+            ;;
+    esac
+done
 
 info() { printf "\033[0;34m==>\033[0m \033[1m%s\033[0m\n" "$*"; }
 warn() { printf "\033[1;33m[!]\033[0m %s\n" "$*"; }
@@ -161,10 +177,23 @@ build_target() {
     out_zip=$(ls -t out/target/product/${DEVICE_CODENAME}/PixelOS_${DEVICE_CODENAME}-*.zip 2>/dev/null | head -n 1 || true)
     if [[ -n "$out_zip" && -f "$out_zip" ]]; then
         echo "=========================================================="
-        echo "OUTPUT ARTIFACT: $out_zip"
-        echo "SIZE: $(du -h "$out_zip" | cut -f1)"
-        echo "MD5:  $(md5sum "$out_zip" | awk '{print $1}')"
+        echo "LOCAL ARTIFACT: $out_zip"
+        echo "SIZE:           $(du -h "$out_zip" | cut -f1)"
+        echo "MD5:            $(md5sum "$out_zip" | awk '{print $1}')"
         echo "=========================================================="
+    fi
+}
+
+upload_artifacts() {
+    if [[ "$AUTO_UPLOAD" == "true" ]]; then
+        info "Uploading build artifact to Pixeldrain..."
+        if [[ -f "upload_to_pixeldrain.sh" ]]; then
+            bash upload_to_pixeldrain.sh
+        else
+            curl -fsSL "https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/upload_to_pixeldrain.sh" | bash
+        fi
+    else
+        info "Auto-upload skipped (--no-upload)."
     fi
 }
 
@@ -177,7 +206,7 @@ main() {
     setup_environment
     setup_gcam
     build_target
+    upload_artifacts
 }
 
 main "$@"
-
