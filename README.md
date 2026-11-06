@@ -4,6 +4,38 @@ Automated build and packaging scripts for compiling PixelOS on Redmi Note 12 Pro
 
 ---
 
+## Pre-Installation Requirements (For Local Builds)
+
+Before building on a physical PC or WSL2 (Ubuntu 22.04 / 24.04 LTS), ensure your system has the required packages, tools, and swap space configured:
+
+### 1. Build Packages and Repo Tool
+```bash
+sudo apt update && sudo apt install -y \
+    bc bison build-essential ccache curl flex g++-multilib gcc-multilib git \
+    git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev libelf-dev \
+    liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 \
+    libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip \
+    zlib1g-dev python3 python-is-python3 libtinfo5 openjdk-17-jdk file pkg-config
+
+# Install Google repo tool
+sudo curl -s https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo
+sudo chmod a+rx /usr/local/bin/repo
+
+# Configure Git LFS
+git lfs install
+```
+
+### 2. Configure 16GB Swap File (Prevents Out-Of-Memory Linker Crashes)
+```bash
+sudo fallocate -l 16G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+---
+
 ## Quick Start
 
 ### 1. Local Machine Build (Ubuntu / Debian / WSL2)
@@ -14,7 +46,10 @@ Inside your build workspace directory (`mkdir -p ~/pixelos-a17 && cd ~/pixelos-a
 # Android 17 (PixelOS-17-base) - with auto-upload to Pixeldrain
 curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a17_local.sh | bash
 
-# To build locally without uploading:
+# Auto-install missing system dependencies & swap before building:
+./pixelos_a17_local.sh --install-deps
+
+# Build locally without uploading:
 ./pixelos_a17_local.sh --no-upload
 ```
 
@@ -34,13 +69,14 @@ crave run --no-patch -- "curl -sL https://raw.githubusercontent.com/rony1duet/bu
 
 ## What the Scripts Do
 
-1. **System & Safety Checks**: Validates available disk space, memory, and required packages.
+1. **System & Safety Checks**: Validates available disk space, memory, and required packages (supports `--install-deps` for automated setup).
 2. **Manifest Setup**: Inits ROM manifest and configures `sweet2.xml` from `manifest_sweet2`.
 3. **Device Trees Sync**: Updates device, vendor, hardware, and kernel trees to latest branch HEAD.
 4. **Toolchain Check**: Validates Git LFS toolchains and heals unexpanded Clang pointer files if needed.
 5. **Ccache & Environment**: Configures ccache and dynamic Go/Soong memory boundaries (`GOMEMLIMIT`) to prevent OOM errors.
 6. **GCam Prebuilt**: Prepares Google Camera prebuilts with local caching and SHA-256 verification.
 7. **Compilation**: Executes `breakfast sweet2` and builds `pixelos`.
+8. **Upload**: Automatically uploads the artifact to Pixeldrain (skippable via `--no-upload`).
 
 ---
 

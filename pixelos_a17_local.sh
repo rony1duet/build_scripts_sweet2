@@ -2,7 +2,7 @@
 #
 # PixelOS A17 Local Build Script for sweet2 (Redmi Note 12 Pro)
 # Works on any Linux machine (Ubuntu / Debian / WSL2)
-# Includes automatic upload to Pixeldrain upon build completion
+# Includes automatic dependency installation, swap setup, and Pixeldrain upload
 # Maintainer: rony1duet
 #
 
@@ -14,9 +14,13 @@ readonly DEVICE_CODENAME="sweet2"
 
 WORKSPACE_DIR="$(pwd)"
 AUTO_UPLOAD=true
+INSTALL_DEPS=false
 
 for arg in "$@"; do
     case "$arg" in
+        --install-deps|-i)
+            INSTALL_DEPS=true
+            ;;
         --no-upload)
             AUTO_UPLOAD=false
             ;;
@@ -32,9 +36,39 @@ info() { printf "\033[0;34m==>\033[0m \033[1m%s\033[0m\n" "$*"; }
 warn() { printf "\033[1;33m[!]\033[0m %s\n" "$*"; }
 die()  { printf "\033[0;31m[x]\033[0m %s\n" "$*" >&2; exit 1; }
 
+install_dependencies() {
+    info "Installing system build packages and toolchain dependencies..."
+
+    if command -v apt-get >/dev/null 2>&1; then
+        sudo apt-get update -y
+        sudo apt-get install -y \
+            bc bison build-essential ccache curl flex g++-multilib gcc-multilib git \
+            git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev libelf-dev \
+            liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 \
+            libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip \
+            zlib1g-dev python3 python-is-python3 libtinfo5 openjdk-17-jdk file pkg-config
+    fi
+
+    if ! command -v repo >/dev/null 2>&1; then
+        info "Installing Google repo tool..."
+        sudo curl -s https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo || \
+            (mkdir -p "$HOME/.local/bin" && curl -s https://storage.googleapis.com/git-repo-downloads/repo -o "$HOME/.local/bin/repo" && chmod a+rx "$HOME/.local/bin/repo")
+        sudo chmod a+rx /usr/local/bin/repo 2>/dev/null || true
+    fi
+
+    export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+    git lfs install 2>/dev/null || true
+}
+
 check_requirements() {
     info "Checking local system requirements..."
     cd "$WORKSPACE_DIR" || die "Directory $WORKSPACE_DIR not found"
+
+    export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+
+    if [[ "$INSTALL_DEPS" == "true" ]] || ! command -v repo >/dev/null 2>&1 || ! command -v git-lfs >/dev/null 2>&1; then
+        install_dependencies
+    fi
 
     local missing_tools=()
     for tool in git curl repo python3; do
@@ -42,7 +76,7 @@ check_requirements() {
     done
 
     if [[ ${#missing_tools[@]} -gt 0 ]]; then
-        die "Missing required tools: ${missing_tools[*]}. Please install them before running this script."
+        die "Missing required tools: ${missing_tools[*]}. Run with --install-deps to install them automatically."
     fi
 
     local avail_gb
@@ -62,7 +96,15 @@ check_requirements() {
         info "Total memory available (RAM + Swap): ${total_mem_gb}GB"
         if [[ "$total_mem_gb" -lt 24 ]]; then
             warn "Total memory (RAM + Swap) is under 24GB. The build may get killed by OOM killer during link phases."
-            warn "To add a 16GB swap file, run: sudo fallocate -l 16G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile"
+            if [[ "$INSTALL_DEPS" == "true" ]] && ! swapon --show | grep -q "/swapfile"; then
+                info "Auto-provisioning 16GB /swapfile..."
+                sudo fallocate -l 16G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=16384 status=progress
+                sudo chmod 600 /swapfile
+                sudo mkswap /swapfile
+                sudo swapon /swapfile 2>/dev/null || true
+            else
+                warn "To add a 16GB swap file, run: sudo fallocate -l 16G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile"
+            fi
         fi
     fi
 }
