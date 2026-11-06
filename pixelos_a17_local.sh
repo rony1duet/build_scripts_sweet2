@@ -260,6 +260,14 @@ setup_environment() {
     export SKIP_BOOT_JARS_CHECK=true
     export WITHOUT_CHECK_API=true
 
+    # Use standard battle-tested Ninja instead of Siso to eliminate memory stall watcher kills
+    export SOONG_NINJA=ninja
+
+    # Raise open files and stack size limits
+    ulimit -n 65535 2>/dev/null || true
+    ulimit -s 16384 2>/dev/null || true
+
+    # Enable ccache
     export USE_CCACHE=1
     export CCACHE_EXEC="$(command -v ccache || echo '/usr/bin/ccache')"
     export CCACHE_DIR="${CCACHE_DIR:-$HOME/.ccache}"
@@ -267,72 +275,12 @@ setup_environment() {
         ccache -M 50G >/dev/null 2>&1 || true
     fi
 
-    # Disable systemd-oomd if running, as it kills soong_build during high I/O memory stalls
-    if command -v systemctl >/dev/null 2>&1; then
-        sudo systemctl stop systemd-oomd 2>/dev/null || true
-        sudo systemctl disable systemd-oomd 2>/dev/null || true
-    fi
-
-    # Check for container cgroup memory limits to calculate effective RAM
-    local container_mem_gb=0
-    if [[ -f /sys/fs/cgroup/memory.max ]]; then
-        local max_bytes
-        max_bytes=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo "max")
-        if [[ "$max_bytes" =~ ^[0-9]+$ ]]; then
-            container_mem_gb=$(( max_bytes / 1024 / 1024 / 1024 ))
-        fi
-    elif [[ -f /sys/fs/cgroup/memory/memory.limit_in_bytes ]]; then
-        local max_bytes
-        max_bytes=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo "0")
-        if [[ "$max_bytes" =~ ^[0-9]+$ && "$max_bytes" -lt 9000000000000000000 ]]; then
-            container_mem_gb=$(( max_bytes / 1024 / 1024 / 1024 ))
-        fi
-    fi
-
-    local ram_gb=16
-    if [[ -f /proc/meminfo ]]; then
-        ram_gb=$(awk '/MemTotal/{print int($2/1024/1024)}' /proc/meminfo)
-    fi
-
-    local effective_ram_gb="$ram_gb"
-    if [[ "$container_mem_gb" -gt 0 ]]; then
-        effective_ram_gb="$container_mem_gb"
-    fi
-
-    info "Tuning Go runtime for ${effective_ram_gb}GB effective RAM..."
-
-    if [[ "$effective_ram_gb" -ge 256 ]]; then
-        export GOMEMLIMIT="64GiB"
-        export GOGC=100
-        export SOONG_GOGC=100
-        export GOMAXPROCS=32
-    elif [[ "$effective_ram_gb" -ge 128 ]]; then
-        export GOMEMLIMIT="48GiB"
-        export GOGC=80
-        export SOONG_GOGC=80
-        export GOMAXPROCS=24
-    elif [[ "$effective_ram_gb" -ge 64 ]]; then
-        export GOMEMLIMIT="32GiB"
-        export GOGC=60
-        export SOONG_GOGC=60
-        export GOMAXPROCS=16
-    elif [[ "$effective_ram_gb" -ge 32 ]]; then
-        export GOMEMLIMIT="20GiB"
-        export GOGC=40
-        export SOONG_GOGC=40
-        export GOMAXPROCS=12
-    elif [[ "$effective_ram_gb" -ge 16 ]]; then
-        export GOMEMLIMIT="12GiB"
-        export GOGC=30
-        export SOONG_GOGC=30
-        export GOMAXPROCS=8
-    else
-        export GOMEMLIMIT="8GiB"
-        export GOGC=25
-        export SOONG_GOGC=25
-        export GOMAXPROCS=4
-    fi
-
+    # Restrict soong_build concurrency to 4 parallel workers so AST allocation rate
+    # never triggers memory pressure stalls or OOM kills on high-core servers
+    export GOMAXPROCS=4
+    export GOMEMLIMIT="16GiB"
+    export GOGC=40
+    export SOONG_GOGC=40
     export MALLOC_ARENA_MAX=2
     export SOONG_INCREMENTAL_ANALYSIS=false
 }
