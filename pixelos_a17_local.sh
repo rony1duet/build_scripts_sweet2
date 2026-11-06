@@ -8,7 +8,7 @@
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.3.2"
+readonly SCRIPT_VERSION="1.3.3"
 readonly ROM_NAME="PixelOS"
 readonly ROM_MANIFEST_BRANCH="seventeen"
 readonly DEVICE_BRANCH="PixelOS-17-base"
@@ -231,7 +231,7 @@ install_dependencies() {
             git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev libelf-dev
             libncurses-dev libssl-dev libxml2-utils lz4 liblz4-dev lzop pngcrush rsync
             schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python-is-python3
-            openjdk-17-jdk file pkg-config
+            openjdk-17-jdk file pkg-config util-linux
         )
 
         local to_install=()
@@ -483,6 +483,25 @@ sanitize_configs() {
 
     # Clear stale or aborted soong bootstrap ninja state
     rm -rf out/soong/.bootstrap out/soong/build.*.ninja out/soong/.temp 2>/dev/null || true
+
+    # Ensure build/soong passes container memory limits to soong_build under env -i
+    if [[ -f "build/soong/ui/build/soong.go" ]]; then
+        python3 -c '
+path = "build/soong/ui/build/soong.go"
+try:
+    with open(path, "r") as f:
+        content = f.read()
+    target = "invocationEnv := make(map[string]string)"
+    if "GOMEMLIMIT" not in content and target in content:
+        injection = target + "\n\tfor _, envVar := range []string{\"GOMEMLIMIT\", \"GOGC\", \"GODEBUG\", \"GOMAXPROCS\", \"TARGET_RELEASE\"} {\n\t\tif val := os.Getenv(envVar); val != \"\" {\n\t\t\tinvocationEnv[envVar] = val\n\t\t}\n\t}"
+        content = content.replace(target, injection, 1)
+        with open(path, "w") as f:
+            f.write(content)
+        print("Configured build/soong container memory forwarding")
+except Exception as e:
+    pass
+' 2>/dev/null || true
+    fi
 }
 
 setup_environment() {
@@ -520,8 +539,14 @@ setup_environment() {
     fi
 
     # Dynamically scale Go runtime and parallel workers based on effective RAM
-    local host_ram_gb=16
+    local host_ram_gb=16 host_swap_gb=0
     [[ -f /proc/meminfo ]] && host_ram_gb=$(awk '/MemTotal/{print int($2/1024/1024)}' /proc/meminfo)
+    [[ -f /proc/meminfo ]] && host_swap_gb=$(awk '/SwapTotal/{print int($2/1024/1024)}' /proc/meminfo)
+
+    local is_container=false
+    if [[ -f /.dockerenv ]] || grep -qa 'container=docker' /proc/1/environ 2>/dev/null; then
+        is_container=true
+    fi
 
     local cgroup_limit_bytes=0
     if [[ -f /sys/fs/cgroup/memory.max ]]; then
@@ -553,23 +578,39 @@ setup_environment() {
         sudo rm -f /swapfile 2>/dev/null || true
     fi
 
-    if [[ "$effective_ram_gb" -ge 64 ]]; then
-        # Dedicated large server / VM (e.g. 755GB EPYC or 62.7GB Ryzen)
-        export GOMEMLIMIT="32GiB"
-        export GOGC=100
-        export SOONG_GOGC=100
+    if [[ "$is_container" == "true" || "$host_swap_gb" -eq 0 ]]; then
+        info "Constrained container / zero-swap environment detected (Container: ${is_container}, Swap: ${host_swap_gb}GB)."
+        info "Allocating safe memory parameters to prevent OOM killer..."
+        export GOMEMLIMIT="3000MiB"
+        export GOGC=40
+        export SOONG_GOGC=40
+        export GOMAXPROCS=8
+        export NINJA_HIGHMEM_NUM_JOBS=1
+    elif [[ "$effective_ram_gb" -ge 64 ]]; then
+        # Dedicated large server / VM (e.g. 755GB EPYC or 62.7GB Ryzen) with active swap
+        export GOMEMLIMIT="24GiB"
+        export GOGC=80
+        export SOONG_GOGC=80
+        export GOMAXPROCS=16
+        export NINJA_HIGHMEM_NUM_JOBS=2
     elif [[ "$effective_ram_gb" -ge 32 ]]; then
-        export GOMEMLIMIT="20GiB"
-        export GOGC=70
-        export SOONG_GOGC=70
+        export GOMEMLIMIT="16GiB"
+        export GOGC=60
+        export SOONG_GOGC=60
+        export GOMAXPROCS=8
+        export NINJA_HIGHMEM_NUM_JOBS=1
     elif [[ "$effective_ram_gb" -ge 16 ]]; then
-        export GOMEMLIMIT="12GiB"
-        export GOGC=50
-        export SOONG_GOGC=50
+        export GOMEMLIMIT="10GiB"
+        export GOGC=40
+        export SOONG_GOGC=40
+        export GOMAXPROCS=4
+        export NINJA_HIGHMEM_NUM_JOBS=1
     else
-        export GOMEMLIMIT="8GiB"
+        export GOMEMLIMIT="6GiB"
         export GOGC=30
         export SOONG_GOGC=30
+        export GOMAXPROCS=2
+        export NINJA_HIGHMEM_NUM_JOBS=1
     fi
 
     # DO NOT set MALLOC_ARENA_MAX=2 on high-core systems to prevent thread lock contention
@@ -614,9 +655,35 @@ build_target() {
     # Ensure TARGET_RELEASE is explicitly exported for Soong and Kati dumpvars
     export TARGET_RELEASE="${TARGET_RELEASE:-trunk_staging}"
 
-    info "Compiling m pixelos..."
+    # Determine safe parallelism for compilation
+    local total_cores
+    total_cores=$(nproc --all 2>/dev/null || echo 8)
+    local jobs="$total_cores"
+
+    local host_swap_gb=0
+    [[ -f /proc/meminfo ]] && host_swap_gb=$(awk '/SwapTotal/{print int($2/1024/1024)}' /proc/meminfo)
+    local is_container=false
+    if [[ -f /.dockerenv ]] || grep -qa 'container=docker' /proc/1/environ 2>/dev/null; then
+        is_container=true
+    fi
+
+    if [[ "$is_container" == "true" || "$host_swap_gb" -eq 0 ]]; then
+        # In containers or zero-swap systems, cap parallel build jobs to 8 to avoid OOM kills
+        if [[ "$jobs" -gt 8 ]]; then
+            jobs=8
+        fi
+    elif [[ "$jobs" -gt 16 ]]; then
+        # Default cap to 16 for build stability on high-core server CPUs
+        jobs=16
+    fi
+
+    info "Compiling m -j${jobs} pixelos..."
     set +e
-    m pixelos 2>&1 | tee -a "${WORKSPACE_DIR}/out/.last_build.log"
+    if command -v taskset >/dev/null 2>&1 && [[ "$total_cores" -gt "$jobs" ]]; then
+        taskset -c 0-$((jobs - 1)) m -j"${jobs}" pixelos 2>&1 | tee -a "${WORKSPACE_DIR}/out/.last_build.log"
+    else
+        m -j"${jobs}" pixelos 2>&1 | tee -a "${WORKSPACE_DIR}/out/.last_build.log"
+    fi
     local build_rc=${PIPESTATUS[0]}
     set -e
     [[ $build_rc -eq 0 ]] || die "Build failed! Check ${FAILURE_LOG}"
