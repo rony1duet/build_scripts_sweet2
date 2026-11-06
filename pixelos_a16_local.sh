@@ -8,7 +8,7 @@
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.3.1"
+readonly SCRIPT_VERSION="1.3.2"
 readonly ROM_NAME="PixelOS"
 readonly ROM_MANIFEST_URL="https://github.com/PixelOS-AOSP/android_manifest.git"
 readonly ROM_MANIFEST_BRANCH="sixteen-qpr2"
@@ -19,6 +19,7 @@ readonly DEVICE_CODENAME="sweet2"
 WORKSPACE_DIR="$(pwd)"
 AUTO_UPLOAD=true
 INSTALL_DEPS=false
+TARGET_RELEASE="${TARGET_RELEASE:-trunk_staging}"
 
 for arg in "$@"; do
     case "$arg" in
@@ -27,6 +28,9 @@ for arg in "$@"; do
             ;;
         --no-upload)
             AUTO_UPLOAD=false
+            ;;
+        --release=*|-r=*)
+            TARGET_RELEASE="${arg#*=}"
             ;;
         *)
             if [[ -d "$arg" ]]; then
@@ -411,7 +415,7 @@ sync_sources() {
 }
 
 sync_device_repos() {
-    info "Updating device repositories..."
+    info "Updating device repositories and build/soong..."
 
     local repos=(
         device/xiaomi/sm6150-common
@@ -423,19 +427,36 @@ sync_device_repos() {
         vendor/xiaomi/sweet2
         vendor/android_prebuilts_sweet2
         vendor/GCam_sweet2
+        build/soong
     )
 
     for repo in "${repos[@]}"; do
         if [[ -d "$repo/.git" ]]; then
-            git -C "$repo" fetch origin "${DEVICE_BRANCH}" --depth=1 2>/dev/null || true
-            git -C "$repo" reset --hard "origin/${DEVICE_BRANCH}" 2>/dev/null || true
+            local branch="${DEVICE_BRANCH}"
+            if [[ "$repo" == "build/soong" ]]; then
+                branch="${ROM_MANIFEST_BRANCH}"
+            fi
+            git -C "$repo" fetch origin "$branch" --depth=1 2>/dev/null || true
+            git -C "$repo" reset --hard "origin/$branch" 2>/dev/null || true
             echo "  -> $repo: $(git -C "$repo" log -1 --oneline 2>/dev/null)"
         fi
     done
 }
 
 setup_toolchain() {
-    info "Validating toolchains and Git LFS..."
+    info "Validating build/soong, toolchains, and Git LFS..."
+
+    if [[ ! -f "build/soong/soong_ui.bash" ]]; then
+        info "Syncing build/soong..."
+        repo sync -c -j4 --force-sync build/soong
+    fi
+    [[ -f "build/soong/soong_ui.bash" ]] || die "Missing build/soong/soong_ui.bash"
+
+    # Ensure build/soong passes through GOMEMLIMIT, GOGC, GOMAXPROCS, and TARGET_RELEASE into the bootstrap environment
+    if [[ -f "build/soong/ui/build/soong.go" ]] && ! grep -q "GOMEMLIMIT" "build/soong/ui/build/soong.go"; then
+        info "Applying container memory pass-through patch to build/soong..."
+        sed -i '/invocationEnv := make(map\[string\]string)/a \\tfor _, envVar := range []string{"GOMEMLIMIT", "GOGC", "GODEBUG", "GOMAXPROCS", "TARGET_RELEASE"} {\n\t\tif val := os.Getenv(envVar); val != "" {\n\t\t\tinvocationEnv[envVar] = val\n\t\t}\n\t}' build/soong/ui/build/soong.go 2>/dev/null || true
+    fi
 
     git lfs install 2>/dev/null || true
     repo forall -r "prebuilts/.*" -c "git lfs pull" 2>/dev/null || true
@@ -476,6 +497,7 @@ setup_environment() {
     export DONT_INSTALL_DEXPREOPT_TESTS=true
     export SKIP_BOOT_JARS_CHECK=true
     export WITHOUT_CHECK_API=true
+    export TARGET_RELEASE="${TARGET_RELEASE:-trunk_staging}"
 
     # Use standard battle-tested Ninja instead of Siso to eliminate memory stall watcher kills
     export SOONG_NINJA=ninja
@@ -528,22 +550,34 @@ setup_environment() {
 
     info "Allocating Go build parameters for ${effective_ram_gb}GB RAM system..."
 
-    if [[ "$effective_ram_gb" -ge 128 ]]; then
-        # High-spec workstation/server (755GB EPYC)
-        export GOMEMLIMIT="128GiB"
-        export GOGC=100
-        export SOONG_GOGC=100
-        export GOMAXPROCS=32
+    # Clean up dead unmounted swapfile to reclaim disk space
+    if [[ -f /swapfile ]] && ! swapon --show 2>/dev/null | grep -q "/swapfile"; then
+        sudo rm -f /swapfile 2>/dev/null || true
+    fi
+
+    local is_container=false
+    if [[ -f /.dockerenv ]] || grep -qa 'container=docker' /proc/1/environ 2>/dev/null; then
+        is_container=true
+    fi
+
+    if [[ "$is_container" == "true" ]]; then
+        # Inside Docker container with 0 swap, cap strictly to safe envelope to prevent cgroup OOM
+        info "Container environment detected with no swap. Enforcing safe 10GiB memory boundary..."
+        export GOMEMLIMIT="10GiB"
+        export GOGC=25
+        export SOONG_GOGC=25
+        export GOMAXPROCS=4
     elif [[ "$effective_ram_gb" -ge 64 ]]; then
-        export GOMEMLIMIT="48GiB"
-        export GOGC=100
-        export SOONG_GOGC=100
-        export GOMAXPROCS=24
-    elif [[ "$effective_ram_gb" -ge 32 ]]; then
+        # Dedicated bare-metal server / VM (e.g. 62.7GB Ryzen VM)
         export GOMEMLIMIT="24GiB"
-        export GOGC=80
-        export SOONG_GOGC=80
+        export GOGC=75
+        export SOONG_GOGC=75
         export GOMAXPROCS=16
+    elif [[ "$effective_ram_gb" -ge 32 ]]; then
+        export GOMEMLIMIT="20GiB"
+        export GOGC=70
+        export SOONG_GOGC=70
+        export GOMAXPROCS=12
     elif [[ "$effective_ram_gb" -ge 16 ]]; then
         export GOMEMLIMIT="12GiB"
         export GOGC=50
@@ -576,13 +610,27 @@ build_target() {
 
     mkdir -p "${WORKSPACE_DIR}/out"
 
+    export TARGET_RELEASE="${TARGET_RELEASE:-trunk_staging}"
+    export TARGET_PRODUCT="custom_${DEVICE_CODENAME}"
+    export TARGET_BUILD_VARIANT="userdebug"
+
     set +e
     # shellcheck source=/dev/null
     source build/envsetup.sh
-    breakfast "${DEVICE_CODENAME}" 2>&1 | tee -a "${WORKSPACE_DIR}/out/.last_build.log"
+
+    info "Configuring build target (${TARGET_PRODUCT}-${TARGET_RELEASE}-${TARGET_BUILD_VARIANT})..."
+    lunch "${TARGET_PRODUCT}-${TARGET_RELEASE}-${TARGET_BUILD_VARIANT}" 2>&1 | tee -a "${WORKSPACE_DIR}/out/.last_build.log"
     local rc=${PIPESTATUS[0]}
+    if [[ $rc -ne 0 ]]; then
+        warn "Direct 3-part lunch encountered an issue; falling back to breakfast ${DEVICE_CODENAME}..."
+        breakfast "${DEVICE_CODENAME}" 2>&1 | tee -a "${WORKSPACE_DIR}/out/.last_build.log"
+        rc=${PIPESTATUS[0]}
+    fi
     set -e
-    [[ $rc -eq 0 ]] || die "breakfast ${DEVICE_CODENAME} failed"
+    [[ $rc -eq 0 ]] || die "Target configuration failed for ${DEVICE_CODENAME}"
+
+    # Ensure TARGET_RELEASE is explicitly exported for Soong and Kati dumpvars
+    export TARGET_RELEASE="${TARGET_RELEASE:-trunk_staging}"
 
     info "Compiling m pixelos..."
     set +e
