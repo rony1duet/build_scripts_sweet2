@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# PixelOS build script for sweet2 (Redmi Note 10 Pro)
+# PixelOS build script for sweet2 (Redmi Note 12 Pro)
 # Target: Android 17 (seventeen / PixelOS-17-base)
 # Maintainer: rony1duet
 #
