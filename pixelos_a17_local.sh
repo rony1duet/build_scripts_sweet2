@@ -110,31 +110,56 @@ check_requirements() {
         info "Available disk space: ${avail_gb}GB"
     fi
 
-    local total_ram_kb=0 total_swap_kb=0
-    [[ -f /proc/meminfo ]] && total_ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-    [[ -f /proc/meminfo ]] && total_swap_kb=$(grep SwapTotal /proc/meminfo | awk '{print $2}')
-    local total_mem_gb=$(( (total_ram_kb + total_swap_kb) / 1024 / 1024 ))
+    local host_ram_gb=16 host_swap_gb=0
+    [[ -f /proc/meminfo ]] && host_ram_gb=$(awk '/MemTotal/{print int($2/1024/1024)}' /proc/meminfo)
+    [[ -f /proc/meminfo ]] && host_swap_gb=$(awk '/SwapTotal/{print int($2/1024/1024)}' /proc/meminfo)
+
+    # Check for container cgroup memory limits (cgroups v1 and v2)
+    local cgroup_limit_bytes=0
+    if [[ -f /sys/fs/cgroup/memory.max ]]; then
+        local max_str
+        max_str=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo "max")
+        if [[ "$max_str" =~ ^[0-9]+$ ]]; then
+            cgroup_limit_bytes="$max_str"
+        fi
+    elif [[ -f /sys/fs/cgroup/memory/memory.limit_in_bytes ]]; then
+        local max_str
+        max_str=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo "0")
+        if [[ "$max_str" =~ ^[0-9]+$ && "$max_str" -lt 9000000000000000000 ]]; then
+            cgroup_limit_bytes="$max_str"
+        fi
+    fi
+
+    local effective_ram_gb="$host_ram_gb"
+    if [[ "$cgroup_limit_bytes" -gt 0 ]]; then
+        local cg_gb=$(( cgroup_limit_bytes / 1024 / 1024 / 1024 ))
+        if [[ "$cg_gb" -gt 0 && "$cg_gb" -lt "$host_ram_gb" ]]; then
+            effective_ram_gb="$cg_gb"
+            info "Host RAM: ${host_ram_gb}GB, Container CGroup Limit: ${effective_ram_gb}GB (Swap: ${host_swap_gb}GB)"
+        else
+            info "System RAM: ${host_ram_gb}GB (Unconstrained Container / Host, Swap: ${host_swap_gb}GB)"
+        fi
+    else
+        info "System RAM: ${host_ram_gb}GB (Swap: ${host_swap_gb}GB)"
+    fi
 
     local is_container=false
     if [[ -f /.dockerenv ]] || grep -qa 'container=docker' /proc/1/environ 2>/dev/null; then
         is_container=true
     fi
 
-    if [[ "$total_mem_gb" -gt 0 ]]; then
-        info "Total memory available (RAM + Swap): ${total_mem_gb}GB"
-        if [[ "$total_mem_gb" -lt 24 ]]; then
-            warn "Total memory (RAM + Swap) is under 24GB. The build may get killed by OOM killer during link phases."
-            if [[ "$is_container" == "true" ]]; then
-                info "Running inside a container; allocate additional RAM/swap on host if build is OOM killed."
-            elif [[ "$INSTALL_DEPS" == "true" ]] && ! swapon --show 2>/dev/null | grep -q "/swapfile"; then
-                info "Auto-provisioning 16GB /swapfile..."
-                sudo fallocate -l 16G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=16384 status=progress
-                sudo chmod 600 /swapfile
-                sudo mkswap /swapfile 2>/dev/null || true
-                sudo swapon /swapfile 2>/dev/null || true
-            else
-                warn "To add a 16GB swap file, run: sudo fallocate -l 16G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile"
-            fi
+    if [[ "$effective_ram_gb" -lt 24 && "$host_swap_gb" -lt 8 ]]; then
+        warn "Effective RAM is under 24GB with minimal swap (${host_swap_gb}GB)."
+        if [[ "$is_container" == "true" ]]; then
+            info "Running inside a container; allocate additional RAM/swap on host if build is OOM killed."
+        elif [[ "$INSTALL_DEPS" == "true" ]] && ! swapon --show 2>/dev/null | grep -q "/swapfile"; then
+            info "Auto-provisioning 16GB /swapfile..."
+            sudo fallocate -l 16G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=16384 status=progress 2>/dev/null || true
+            sudo chmod 600 /swapfile 2>/dev/null || true
+            sudo mkswap /swapfile 2>/dev/null || true
+            sudo swapon /swapfile 2>/dev/null || true
+        else
+            warn "To add a 16GB swap file, run: sudo fallocate -l 16G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile"
         fi
     fi
 }
@@ -263,9 +288,16 @@ setup_environment() {
     # Use standard battle-tested Ninja instead of Siso to eliminate memory stall watcher kills
     export SOONG_NINJA=ninja
 
-    # Raise open files and stack size limits
+    # Raise open files, process, and stack size limits
     ulimit -n 65535 2>/dev/null || true
     ulimit -s 16384 2>/dev/null || true
+    ulimit -u 65535 2>/dev/null || true
+
+    # Disable systemd-oomd if running, as it kills soong_build during high I/O memory stalls
+    if command -v systemctl >/dev/null 2>&1; then
+        sudo systemctl stop systemd-oomd 2>/dev/null || true
+        sudo systemctl disable --now systemd-oomd 2>/dev/null || true
+    fi
 
     # Enable ccache
     export USE_CCACHE=1
@@ -275,13 +307,65 @@ setup_environment() {
         ccache -M 50G >/dev/null 2>&1 || true
     fi
 
-    # Restrict soong_build concurrency to 4 parallel workers so AST allocation rate
-    # never triggers memory pressure stalls or OOM kills on high-core servers
-    export GOMAXPROCS=4
-    export GOMEMLIMIT="16GiB"
-    export GOGC=40
-    export SOONG_GOGC=40
-    export MALLOC_ARENA_MAX=2
+    # Dynamically scale Go runtime and parallel workers based on effective RAM
+    local host_ram_gb=16
+    [[ -f /proc/meminfo ]] && host_ram_gb=$(awk '/MemTotal/{print int($2/1024/1024)}' /proc/meminfo)
+
+    local cgroup_limit_bytes=0
+    if [[ -f /sys/fs/cgroup/memory.max ]]; then
+        local max_str
+        max_str=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo "max")
+        if [[ "$max_str" =~ ^[0-9]+$ ]]; then
+            cgroup_limit_bytes="$max_str"
+        fi
+    elif [[ -f /sys/fs/cgroup/memory/memory.limit_in_bytes ]]; then
+        local max_str
+        max_str=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo "0")
+        if [[ "$max_str" =~ ^[0-9]+$ && "$max_str" -lt 9000000000000000000 ]]; then
+            cgroup_limit_bytes="$max_str"
+        fi
+    fi
+
+    local effective_ram_gb="$host_ram_gb"
+    if [[ "$cgroup_limit_bytes" -gt 0 ]]; then
+        local cg_gb=$(( cgroup_limit_bytes / 1024 / 1024 / 1024 ))
+        if [[ "$cg_gb" -gt 0 && "$cg_gb" -lt "$host_ram_gb" ]]; then
+            effective_ram_gb="$cg_gb"
+        fi
+    fi
+
+    info "Allocating Go build parameters for ${effective_ram_gb}GB RAM system..."
+
+    if [[ "$effective_ram_gb" -ge 128 ]]; then
+        # High-spec workstation/server (755GB EPYC)
+        export GOMEMLIMIT="128GiB"
+        export GOGC=100
+        export SOONG_GOGC=100
+        export GOMAXPROCS=32
+    elif [[ "$effective_ram_gb" -ge 64 ]]; then
+        export GOMEMLIMIT="48GiB"
+        export GOGC=100
+        export SOONG_GOGC=100
+        export GOMAXPROCS=24
+    elif [[ "$effective_ram_gb" -ge 32 ]]; then
+        export GOMEMLIMIT="24GiB"
+        export GOGC=80
+        export SOONG_GOGC=80
+        export GOMAXPROCS=16
+    elif [[ "$effective_ram_gb" -ge 16 ]]; then
+        export GOMEMLIMIT="12GiB"
+        export GOGC=50
+        export SOONG_GOGC=50
+        export GOMAXPROCS=8
+    else
+        export GOMEMLIMIT="8GiB"
+        export GOGC=30
+        export SOONG_GOGC=30
+        export GOMAXPROCS=4
+    fi
+
+    # DO NOT set MALLOC_ARENA_MAX=2 on high-core systems to prevent thread lock contention
+    unset MALLOC_ARENA_MAX
     export SOONG_INCREMENTAL_ANALYSIS=false
 }
 
