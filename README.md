@@ -1,32 +1,32 @@
-# PixelOS 17 Build Scripts (`sweet2`)
+# PixelOS Build Scripts for sweet2
 
-Automated build and packaging scripts for compiling **PixelOS 17 (Android 17)** on **Redmi Note 12 Pro 4G (`sweet2`)** via [Crave](https://crave.io).
+Automated build and packaging scripts for compiling PixelOS on Redmi Note 12 Pro 4G (`sweet2`) via Crave.
 
----
+## Quick Start (Crave)
 
-## 📋 Full Documentation & Release Changelog
-
-The complete ROM release changelog and architecture documentation are maintained directly on the **main** branch:
-👉 **[View Official Release Changelog](./CHANGELOG.md)**
-
----
-
-## 🚀 Quick Start on Crave
-
-To compile PixelOS 17 for sweet2:
+To run a build on Crave:
 
 ```bash
-crave run --no-patch -- "bash <(curl -sL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a17.sh)"
+# Android 17 (PixelOS-17-base)
+crave run --no-patch -- "curl -sL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a17.sh | bash"
+
+# Android 16 (PixelOS-16-QPR2)
+crave run --no-patch -- "curl -sL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/PixelOS-16-QPR2/pixelos_a16.sh | bash"
 ```
 
----
+## What the Scripts Do
 
-## 🛠️ Script Capabilities
+1. **Manifest Setup:** Inits ROM manifest and configures `sweet2.xml` from `manifest_sweet2`.
+2. **Device Trees Sync:** Updates device, vendor, hardware, and kernel trees to latest branch HEAD.
+3. **Toolchain Check:** Validates Git LFS toolchains and heals unexpanded Clang pointer files if needed.
+4. **Intermediate Cleanup:** Purges test suites, unneeded debug symbols, and conflicting module targets while preserving incremental compilation objects.
+5. **GCam Prebuilt:** Prepares Google Camera prebuilts with local caching and SHA-256 verification.
+6. **Compilation:** Executes `breakfast sweet2` and builds `pixelos`.
+7. **Upload:** Dispatches the completed ROM zip to Pixeldrain and prints the direct download link.
 
-[`pixelos_a17.sh`](./pixelos_a17.sh) automates the full build lifecycle:
-1. **Manifest Setup:** Clones and configures `sweet2.xml` from [`manifest_sweet2`](https://github.com/rony1duet/manifest_sweet2) (`main`).
-2. **Repository Parity:** Synchronizes custom device, vendor, kernel, and hardware trees directly to `origin/main`.
-3. **Clang Verification:** Inspects Git LFS toolchains and self-heals ASCII pointer files.
-4. **Intermediate Invalidation:** Wipes stale VINTF and priv-app permission targets to validate FCM level 7.
-5. **GCam Prebuilts:** Automatically downloads and prepares Google Camera prebuilts with local cache preservation and mirror fallbacks.
-6. **Pixeldrain Upload:** Packages and uploads flashable ROM zips via [`upload_to_pixeldrain.sh`](./upload_to_pixeldrain.sh).
+## Branches
+
+- `main` / `PixelOS-17-base`: Android 17 builds
+- `PixelOS-16-QPR2`: Android 16 QPR2 builds
+
+Changelog and device details are available in [CHANGELOG.md](CHANGELOG.md).
