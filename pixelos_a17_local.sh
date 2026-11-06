@@ -162,7 +162,24 @@ sync_sources() {
     info "Syncing sources..."
     local jobs
     jobs=$(nproc --all 2>/dev/null || echo 4)
-    repo sync -c -j"${jobs}" --force-sync --no-clone-bundle --no-tags
+    # Cap parallel network sync jobs to 4 to prevent Google Git HTTP 429 rate limiting
+    if [[ "$jobs" -gt 4 ]]; then
+        jobs=4
+    fi
+
+    local attempt=1
+    local max_attempts=5
+    until repo sync -c -j"${jobs}" --force-sync --no-clone-bundle --no-tags --optimized-fetch --retry-fetches=5; do
+        if [[ "$attempt" -ge "$max_attempts" ]]; then
+            warn "Rate limit encountered. Falling back to single-threaded sync (-j1)..."
+            repo sync -c -j1 --force-sync --no-clone-bundle --no-tags --optimized-fetch || die "Source sync failed"
+            break
+        fi
+        warn "Network sync throttled or interrupted (attempt ${attempt}/${max_attempts}). Waiting 15s before retry..."
+        sleep 15
+        jobs=2
+        attempt=$((attempt + 1))
+    done
 }
 
 setup_toolchain() {
