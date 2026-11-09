@@ -14,7 +14,7 @@
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.3.0"
+readonly SCRIPT_VERSION="1.3.1"
 readonly RECOVERY_NAME="OrangeFox"
 readonly FOX_BRANCH="12.1"
 readonly SYNC_REPO_URL="https://gitlab.com/OrangeFox/sync.git"
@@ -243,7 +243,10 @@ sync_orangefox() {
         git clone --depth=1 "${SYNC_REPO_URL}" "${sync_tool_dir}"
 
         info "Synchronizing OrangeFox ${FOX_BRANCH} minimal manifest into ${WORKSPACE_DIR}..."
-        bash "${sync_tool_dir}/orangefox_sync.sh" --branch "${FOX_BRANCH}" --path "${WORKSPACE_DIR}" --ssh 0
+        (
+            cd "${sync_tool_dir}"
+            bash ./orangefox_sync.sh --branch "${FOX_BRANCH}" --path "${WORKSPACE_DIR}" --ssh 0
+        )
 
         rm -rf "${sync_tool_dir}"
         success "OrangeFox source sync and patch completed."
