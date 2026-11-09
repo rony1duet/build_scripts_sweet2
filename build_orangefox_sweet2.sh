@@ -15,7 +15,7 @@
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.6.0"
+readonly SCRIPT_VERSION="1.7.0"
 readonly RECOVERY_NAME="OrangeFox"
 readonly FOX_BRANCH="12.1"
 readonly SYNC_REPO_URL="https://gitlab.com/OrangeFox/sync.git"
@@ -156,11 +156,26 @@ check_environment() {
         success "Disk space check passed: ${avail_gb} GB available."
     fi
 
-    # Check RAM and configure Swap if needed
+    # Check RAM, container cgroup ceiling, and configure Swap if needed
     local total_ram_mb total_swap_mb
     total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
     total_swap_mb=$(free -m | awk '/^Swap:/{print $2}')
-    info "Host RAM: ${total_ram_mb} MB | Swap: ${total_swap_mb} MB (Build threads capped to: ${JOBS})"
+
+    local cgroup_limit="unlimited"
+    if [[ -f /sys/fs/cgroup/memory.max ]]; then
+        local raw_lim
+        raw_lim=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || true)
+        if [[ "$raw_lim" != "max" && -n "$raw_lim" ]]; then
+            cgroup_limit="$((raw_lim / 1024 / 1024)) MB"
+        fi
+    elif [[ -f /sys/fs/cgroup/memory/memory.limit_in_bytes ]]; then
+        local raw_lim
+        raw_lim=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || true)
+        if [[ -n "$raw_lim" && "$raw_lim" -lt 9223372036854771712 ]]; then
+            cgroup_limit="$((raw_lim / 1024 / 1024)) MB"
+        fi
+    fi
+    info "Host RAM: ${total_ram_mb} MB | Container Cgroup Limit: ${cgroup_limit} | Swap: ${total_swap_mb} MB (Jobs: ${JOBS})"
 
     if [[ "$total_swap_mb" -lt 4000 ]]; then
         if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
@@ -349,9 +364,47 @@ EOF
 }
 
 # 5. Ccache & Environment Setup
+patch_soong_memory() {
+    info "Applying container memory & concurrency safeguards to Soong bootstrap..."
+    cd "${WORKSPACE_DIR}"
+
+    # 1. Patch Blueprint bootstrap generator rule to inject flags past 'env -i'
+    local bp_file="build/blueprint/bootstrap/bootstrap.go"
+    if [[ -f "$bp_file" ]]; then
+        if ! grep -q "GOMAXPROCS=4" "$bp_file"; then
+            info "Patching ${bp_file} to enforce GOMAXPROCS=4 and GOMEMLIMIT=3GiB under env -i..."
+            sed -i 's|env -i "\$\$BUILDER"|env -i GOMAXPROCS=4 GOMEMLIMIT=3GiB GOGC=30 MALLOC_ARENA_MAX=2 "\$\$BUILDER"|g' "$bp_file" || true
+        fi
+    fi
+
+    # 2. Patch existing out/soong/.bootstrap/build.ninja if already generated
+    local ninja_bootstrap="out/soong/.bootstrap/build.ninja"
+    if [[ -f "$ninja_bootstrap" ]]; then
+        if ! grep -q "GOMAXPROCS=4" "$ninja_bootstrap"; then
+            info "Patching ${ninja_bootstrap} build rule..."
+            sed -i 's|env -i "\$BUILDER"|env -i GOMAXPROCS=4 GOMEMLIMIT=3GiB GOGC=30 MALLOC_ARENA_MAX=2 "\$BUILDER"|g' "$ninja_bootstrap" || true
+        fi
+    fi
+
+    # 3. Wrap soong_build binary itself if it exists
+    local sb_bin="out/soong/.bootstrap/bin/soong_build"
+    local sb_real="out/soong/.bootstrap/bin/soong_build.real"
+    if [[ -f "$sb_bin" && ! -f "$sb_real" ]]; then
+        info "Wrapping ${sb_bin} with memory constraints..."
+        mv "$sb_bin" "$sb_real"
+        cat << 'EOF' > "$sb_bin"
+#!/usr/bin/env bash
+exec env GOMAXPROCS=4 GOMEMLIMIT=3GiB GOGC=30 MALLOC_ARENA_MAX=2 "$0.real" "$@"
+EOF
+        chmod +x "$sb_bin"
+    fi
+}
+
 setup_build_environment() {
     info "Configuring build environment and ccache..."
 
+    export TOP="${WORKSPACE_DIR}"
+    export ANDROID_BUILD_TOP="${WORKSPACE_DIR}"
     export USE_CCACHE=1
     export CCACHE_EXEC="/usr/bin/ccache"
     export CCACHE_DIR="${HOME}/.ccache_orangefox"
@@ -373,9 +426,9 @@ setup_build_environment() {
     export TARGET_DEVICE_ALT="${DEVICE_ALIAS},${DEVICE_CODENAME},sweet"
 
     # Memory & Concurrency Safeguards for Soong & Compiler
-    export GOMAXPROCS="${JOBS}"
-    export GOMEMLIMIT=12GiB
-    export GOGC=40
+    export GOMAXPROCS=4
+    export GOMEMLIMIT=3GiB
+    export GOGC=30
     export MALLOC_ARENA_MAX=2
     export NINJA_ARGS="-j${JOBS}"
 
@@ -404,6 +457,8 @@ setup_build_environment() {
     if [[ -f "${WORKSPACE_DIR}/device/${DEVICE_BRAND}/${DEVICE_CODENAME}/addon/Magisk-v27.0.zip" ]]; then
         export FOX_USE_SPECIFIC_MAGISK_ZIP="${WORKSPACE_DIR}/device/${DEVICE_BRAND}/${DEVICE_CODENAME}/addon/Magisk-v27.0.zip"
     fi
+
+    patch_soong_memory
 }
 
 # 6. Compilation
@@ -416,6 +471,12 @@ compile_recovery() {
         warn "Cleaning incomplete/corrupted Soong bootstrap cache from prior interrupted run..."
         rm -rf "${WORKSPACE_DIR}/out/soong" "${WORKSPACE_DIR}/out/.module_paths"
     fi
+
+    # Enforce Soong & Blueprint container memory patches
+    patch_soong_memory
+
+    export TOP="${WORKSPACE_DIR}"
+    export ANDROID_BUILD_TOP="${WORKSPACE_DIR}"
 
     # Envsetup and vendorsetup scripts contain subshells, grep checks, and tests
     # that return non-zero exit codes. Disable -e during envsetup and lunch.
