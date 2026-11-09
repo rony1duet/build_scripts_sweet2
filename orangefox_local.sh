@@ -15,7 +15,7 @@
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.4.0"
+readonly SCRIPT_VERSION="1.5.0"
 readonly RECOVERY_NAME="OrangeFox"
 readonly FOX_BRANCH="12.1"
 readonly SYNC_REPO_URL="https://gitlab.com/OrangeFox/sync.git"
@@ -172,7 +172,7 @@ check_environment() {
 
     # Check for missing basic tools
     local missing=()
-    for tool in git curl repo bison flex python3 ccache patch; do
+    for tool in patch bison flex ccache repo git curl python3; do
         command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
     done
 
@@ -182,7 +182,7 @@ check_environment() {
     fi
 }
 
-# 2. Dependency Installation
+# 2. Robust Dependency Installation
 install_dependencies() {
     info "Installing Android & OrangeFox build dependencies via apt-get..."
 
@@ -191,36 +191,52 @@ install_dependencies() {
         return 0
     fi
 
-    sudo apt-get update -y || true
+    local SUDO=""
+    if command -v sudo >/dev/null 2>&1; then
+        SUDO="sudo"
+    fi
 
-    local pkgs=(
-        aria2 bc bison build-essential ccache curl flex g++-multilib gcc-multilib git
-        git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev libelf-dev
-        libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils
-        lz4 liblz4-tool lzop openjdk-11-jdk patch pngcrush python3 python-is-python3 rsync
-        schedtool squashfs-tools unzip xsltproc zip zlib1g-dev
-    )
+    $SUDO apt-get update -y || true
 
-    local to_install=()
-    for pkg in "${pkgs[@]}"; do
-        if apt-cache policy "$pkg" 2>/dev/null | grep -q 'Candidate: [^(\n]'; then
-            to_install+=("$pkg")
+    # Step A: Install essential tools individually first to avoid batch failures from deprecated packages
+    local core_tools=(patch bison flex ccache git git-lfs curl python3 build-essential rsync zip unzip)
+    for tool in "${core_tools[@]}"; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            info "Installing core tool: ${tool}..."
+            $SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$tool" || true
         fi
     done
 
-    if [[ ${#to_install[@]} -gt 0 ]]; then
-        sudo apt-get install -y "${to_install[@]}" || true
-    fi
+    # Step B: Install the rest of the libraries
+    local pkgs=(
+        aria2 bc g++-multilib gcc-multilib gnupg gperf imagemagick lib32readline-dev
+        lib32z1-dev libelf-dev libncurses-dev libssl-dev libxml2 libxml2-utils
+        lz4 liblz4-tool lzop pngcrush python-is-python3 schedtool squashfs-tools
+        xsltproc zlib1g-dev openjdk-17-jdk openjdk-11-jdk
+    )
 
-    # Ensure repo command is installed
+    $SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${pkgs[@]}" 2>/dev/null || {
+        for p in "${pkgs[@]}"; do
+            $SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$p" 2>/dev/null || true
+        done
+    }
+
+    # Step C: Ensure Google repo command is installed
     if ! command -v repo >/dev/null 2>&1; then
         info "Installing Google repo tool to /usr/local/bin/repo..."
-        sudo curl -s https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo
-        sudo chmod a+rx /usr/local/bin/repo
+        $SUDO curl -s https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo || true
+        $SUDO chmod a+rx /usr/local/bin/repo || true
     fi
 
-    # Configure Git LFS
+    # Step D: Configure Git LFS
     git lfs install 2>/dev/null || true
+
+    # Step E: Verify critical compilation tools are in PATH
+    for tool in patch bison flex ccache repo python3; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            die "Critical build tool '$tool' is missing and could not be installed. Please run: sudo apt-get install -y $tool"
+        fi
+    done
 
     success "Build dependencies installed and verified."
 }
@@ -230,20 +246,14 @@ sync_orangefox() {
     info "Entering OrangeFox workspace: ${WORKSPACE_DIR}..."
     cd "${WORKSPACE_DIR}"
 
-    # If build/envsetup.sh does not exist or force-sync requested, perform fresh sync
-    if [[ ! -f "${WORKSPACE_DIR}/build/envsetup.sh" || "$FORCE_SYNC" == "true" ]]; then
-        # Clean any broken/partial .repo from previous failed attempts
-        if [[ -d "${WORKSPACE_DIR}/.repo" && ! -f "${WORKSPACE_DIR}/build/envsetup.sh" ]]; then
-            warn "Cleaning broken/partial .repo from prior failed init..."
-            rm -rf "${WORKSPACE_DIR}/.repo"
-        fi
-
+    # If vendor/recovery does not exist or force-sync requested, perform fresh/resume sync
+    if [[ ! -d "${WORKSPACE_DIR}/vendor/recovery" || "$FORCE_SYNC" == "true" ]]; then
         local sync_tool_dir="/tmp/ofox_sync_$$"
         rm -rf "${sync_tool_dir}"
         info "Cloning official OrangeFox synchronization tool from GitLab..."
         git clone --depth=1 "${SYNC_REPO_URL}" "${sync_tool_dir}"
 
-        # Copy patches to workspace directory as well to ensure patch files exist in both locations
+        # Copy patches into workspace directory to ensure patch files exist in both locations
         mkdir -p "${WORKSPACE_DIR}/patches"
         cp -rf "${sync_tool_dir}/patches/"* "${WORKSPACE_DIR}/patches/" 2>/dev/null || true
 
