@@ -1,108 +1,115 @@
-# PixelOS Build Scripts for sweet2
+# OrangeFox Recovery Project (OFRP) Build Scripts for sweet2
 
-Automated build and packaging scripts for compiling PixelOS on Redmi Note 12 Pro 4G (`sweet2`) via Crave or on a local Linux PC.
-
----
-
-## Pre-Installation Requirements (For Local Builds)
-
-Before building on a physical PC or WSL2 (Ubuntu 22.04 / 24.04 LTS), ensure your system has the required packages, tools, and swap space configured:
-
-### 1. Build Packages and Repo Tool
-```bash
-sudo apt update && sudo apt install -y \
-    bc bison build-essential ccache curl flex g++-multilib gcc-multilib git \
-    git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev libelf-dev \
-    libncurses-dev libssl-dev libxml2-utils lz4 liblz4-dev lzop pngcrush rsync \
-    schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python-is-python3 \
-    openjdk-17-jdk file pkg-config
-
-# Install Google repo tool
-sudo curl -s https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo
-sudo chmod a+rx /usr/local/bin/repo
-
-# Configure Git LFS
-git lfs install
-```
-
-### 2. Configure 16GB Swap File (Prevents Out-Of-Memory Linker Crashes)
-```bash
-sudo fallocate -l 16G /swapfile
-sudo chmod 600 /swapfile
-sudo mkswap /swapfile
-sudo swapon /swapfile
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-```
+Automated build, environment configuration, and packaging scripts for compiling the latest **OrangeFox Recovery (R12.1 / Android 12.1 base)** for Redmi Note 12 Pro 4G (`sweet2`).
 
 ---
 
-## Quick Start
+## Hardware & System Requirements
 
-### 1. Local Machine Build (Ubuntu / Debian / WSL2 / Docker)
+Building OrangeFox Recovery is significantly lighter than compiling a full Android OS ROM, but still requires a POSIX-compliant Linux environment.
 
-Inside your build workspace directory:
+### 1. Host Operating System
+- **Linux (Recommended)**: Ubuntu 20.04 LTS, Ubuntu 22.04 LTS, or Debian 11/12.
+- **Windows Users**: Must use **WSL2** (Windows Subsystem for Linux) running Ubuntu 22.04 LTS.
+  > [!IMPORTANT]
+  > Android build systems (Kati, Soong, Ninja, toybox) cannot run on native Windows Command Prompt or PowerShell. Native Windows NTFS filesystems (`/mnt/c`, `/mnt/g`) cause case-insensitivity corruption and severe I/O slowdowns. Always clone and build inside the native Linux ext4 filesystem (e.g. `~/fox_12.1`).
 
-#### Android 16 (PixelOS-16-QPR2):
+### 2. Hardware Specifications
+- **CPU**: 4 cores minimum (8+ cores recommended).
+- **RAM**: 16 GB recommended (8–12 GB minimum if paired with an 8–16 GB swap file).
+- **Storage**: Minimum **45–60 GB** free space on an `ext4` partition.
+- **Network**: Broadband connection for shallow sync of OrangeFox minimal manifest (~15–20 GB).
+
+---
+
+## Setting Up Your Local PC (WSL2 / Ubuntu)
+
+### If you are on Windows:
+1. Open PowerShell as Administrator and install WSL2 Ubuntu:
+   ```powershell
+   wsl --install -d Ubuntu-22.04
+   ```
+2. Restart your PC if prompted, then launch Ubuntu from your Start menu.
+3. Once inside Ubuntu, update packages:
+   ```bash
+   sudo apt update && sudo apt upgrade -y
+   ```
+
+---
+
+## Quick Start (Building OrangeFox)
+
+Clone this repository inside your Linux home directory:
+
 ```bash
-# Create and enter workspace directory
-mkdir -p ~/pixelos-a16 && cd ~/pixelos-a16
-
-# Run build with auto-upload to Pixeldrain
-curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a16_local.sh | bash
-
-# With automatic dependency and toolchain installation:
-curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a16_local.sh | bash -s -- --install-deps
-
-# Build locally without uploading:
-curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a16_local.sh | bash -s -- --no-upload
+# Clone the build scripts
+git clone https://github.com/rony1duet/build_scripts_sweet2.git -b orangefox ~/build_scripts_sweet2
+cd ~/build_scripts_sweet2
+chmod +x build_orangefox_sweet2.sh upload_to_pixeldrain.sh
 ```
 
-#### Android 17 (PixelOS-17-base):
+### Build Command (Automatic Setup & Build):
 ```bash
-# Create and enter workspace directory
-mkdir -p ~/pixelos-a17 && cd ~/pixelos-a17
-
-# Run build with auto-upload to Pixeldrain
-curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a17_local.sh | bash
-
-# With automatic dependency and toolchain installation:
-curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a17_local.sh | bash -s -- --install-deps
-
-# Build locally without uploading:
-curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a17_local.sh | bash -s -- --no-upload
+./build_orangefox_sweet2.sh --install-deps
 ```
 
-The local script automatically validates disk space and RAM, configures ccache, sets safe memory limits, syncs sources, pulls prebuilts, compiles `m pixelos`, and uploads the final flashable zip to Pixeldrain.
-
-### 2. Cloud CI Build (Crave)
-
+### Build with Custom Workspace or Options:
 ```bash
-# Android 17 (PixelOS-17-base)
-crave run --no-patch -- "curl -sL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/main/pixelos_a17.sh | bash"
+# Specify custom workspace and number of threads
+./build_orangefox_sweet2.sh -j8 ~/fox_12.1
 
-# Android 16 (PixelOS-16-QPR2)
-crave run --no-patch -- "curl -sL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/PixelOS-16-QPR2/pixelos_a16.sh | bash"
+# Force re-sync of source manifest
+./build_orangefox_sweet2.sh --sync
+
+# Clean previous build artifacts before compiling
+./build_orangefox_sweet2.sh --clean
+
+# Build without uploading to Pixeldrain
+./build_orangefox_sweet2.sh --no-upload
 ```
 
 ---
 
-## What the Scripts Do
+## What the Script Automates
 
-1. **System & Safety Checks**: Validates available disk space, memory, and required packages (supports `--install-deps` for automated setup).
-2. **Manifest Setup**: Inits ROM manifest and configures `sweet2.xml` from `manifest_sweet2`.
-3. **Device Trees Sync**: Updates device, vendor, hardware, and kernel trees to latest branch HEAD.
-4. **Toolchain Check**: Validates Git LFS toolchains and heals unexpanded Clang pointer files if needed.
-5. **Ccache & Environment**: Configures ccache and dynamic Go/Soong memory boundaries (`GOMEMLIMIT`) to prevent OOM errors.
-6. **GCam Prebuilt**: Prepares Google Camera prebuilts with local caching and SHA-256 verification.
-7. **Compilation**: Executes `breakfast sweet2` and builds `pixelos`.
-8. **Upload**: Automatically uploads the artifact to Pixeldrain (skippable via `--no-upload`).
-9. **Consolidated Failure Diagnostics**: On any compilation or build error, aggregates system resources, cgroup limits, kernel dmesg, Soong error logs, and terminal output into a single root `build_failure.log` while clearing intermediate fragmented logs and temp ninja folders in `out/`.
+1. **Host Environment Validation**: Ensures the script is running inside a POSIX Linux / WSL2 environment and verifies available disk space (>= 45 GB) and RAM/swap.
+2. **Dependency Installation (`--install-deps`)**: Installs all required native compilation packages, tools, and Google's `repo` command.
+3. **OrangeFox Manifest Sync**: Initializes and shallow-syncs `https://gitlab.com/OrangeFox/manifest.git` (`fox_12.1`).
+4. **Device Recovery Tree Configuration**: Sets up the recovery device tree for `sweet2` in `device/xiaomi/sweet2` with required OrangeFox makefiles.
+5. **Ccache Optimization**: Configures 25 GB ccache in `~/.ccache_orangefox` to accelerate subsequent builds.
+6. **OrangeFox Flags**: Exports all necessary device environment variables:
+   - `OF_MAINTAINER="rony1duet"`
+   - `FOX_VERSION="R12.1"`
+   - `FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1`
+   - Screen resolution: 1080x2400 (`OF_SCREEN_H=2400`, `OF_STATUS_H=95`)
+   - Decryption support for FBE v2 and metadata encryption.
+7. **Compilation**: Runs `lunch twrp_sweet2-eng` and compiles `mka recoveryimage`.
+8. **Artifact Verification & Upload**:
+   - Generates `out/target/product/sweet2/recovery.img` (Fastboot flashable)
+   - Generates `out/target/product/sweet2/OrangeFox-*.zip` (Recovery flashable)
+   - Automatically uploads the flashable ZIP to Pixeldrain and outputs the download link.
 
 ---
 
-## Branches
+## Flashing OrangeFox Recovery to sweet2
 
-- `main` / `PixelOS-17-base`: Android 17 builds
-- `PixelOS-16-QPR2`: Android 16 QPR2 builds
+Once built, you can flash the recovery via Fastboot:
 
-Changelog and device details are available in [CHANGELOG.md](CHANGELOG.md).
+```bash
+# 1. Reboot device to bootloader (Fastboot mode)
+adb reboot bootloader
+
+# 2. Flash OrangeFox recovery image to the dedicated recovery partition
+fastboot flash recovery out/target/product/sweet2/recovery.img
+
+# 3. Boot directly into OrangeFox Recovery
+fastboot reboot recovery
+```
+
+---
+
+## Branches in this Repository
+
+- `orangefox`: OrangeFox Recovery Project build scripts and configuration for sweet2
+- `main` / `PixelOS-17-base`: PixelOS Android 17 ROM build scripts
+- `PixelOS-16-QPR2`: PixelOS Android 16 QPR2 ROM build scripts
