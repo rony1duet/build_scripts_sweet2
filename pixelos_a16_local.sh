@@ -8,7 +8,7 @@
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.3.4"
+readonly SCRIPT_VERSION="1.3.5"
 readonly ROM_NAME="PixelOS"
 readonly ROM_MANIFEST_URL="https://github.com/PixelOS-AOSP/android_manifest.git"
 readonly ROM_MANIFEST_BRANCH="sixteen-qpr2"
@@ -504,6 +504,11 @@ except Exception as e:
     pass
 ' 2>/dev/null || true
     fi
+
+    # Fix GoogleCameraEng check_prebuilt_presigned_apk failure (contains compressed dex files and is privileged)
+    if [[ -f "vendor/GCam_sweet2/Android.bp" ]] && ! grep -q "skip_preprocessed_apk_checks" vendor/GCam_sweet2/Android.bp; then
+        sed -i '/preprocessed: true,/a \    skip_preprocessed_apk_checks: true,' vendor/GCam_sweet2/Android.bp
+    fi
 }
 
 setup_environment() {
@@ -516,6 +521,7 @@ setup_environment() {
     export DONT_INSTALL_DEXPREOPT_TESTS=true
     export SKIP_BOOT_JARS_CHECK=true
     export WITHOUT_CHECK_API=true
+    export DONT_UNCOMPRESS_PRIV_APPS_DEXS=true
     export TARGET_RELEASE="${TARGET_RELEASE:-trunk_staging}"
 
     # Use standard battle-tested Ninja instead of Siso to eliminate memory stall watcher kills
@@ -631,6 +637,14 @@ setup_gcam() {
     fi
 
     [[ -f "vendor/GCam_sweet2/system/product/app/GoogleCameraEng/GoogleCameraEng.apk" ]] || die "GoogleCameraEng.apk not found"
+
+    # Invalidate stale GCam prebuilt check stamps so Soong re-evaluates check_prebuilt_presigned_apk
+    rm -rf out/soong/.intermediates/vendor/GCam_sweet2 2>/dev/null || true
+
+    # Ensure GCam Android.bp skips preprocessed compressed dex validation for presigned APK
+    if [[ -f "vendor/GCam_sweet2/Android.bp" ]] && ! grep -q "skip_preprocessed_apk_checks" vendor/GCam_sweet2/Android.bp; then
+        sed -i '/preprocessed: true,/a \    skip_preprocessed_apk_checks: true,' vendor/GCam_sweet2/Android.bp
+    fi
 }
 
 build_target() {
