@@ -15,7 +15,7 @@
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.8.0"
+readonly SCRIPT_VERSION="1.8.1"
 readonly RECOVERY_NAME="OrangeFox"
 readonly FOX_BRANCH="12.1"
 readonly SYNC_REPO_URL="https://gitlab.com/OrangeFox/sync.git"
@@ -368,85 +368,81 @@ patch_soong_memory() {
     info "Applying container memory & kernel concurrency safeguards to Soong bootstrap..."
     cd "${WORKSPACE_DIR}"
 
-    # 1. Wrap prebuilt Go toolchain so all Go compilation uses madvdontneed & asyncpreemptoff
+    # 1. Clean up any stale wrapper binaries from previous attempts
+    if [[ -f "out/soong/.bootstrap/bin/soong_build.real" ]]; then
+        info "Cleaning up stale soong_build.real..."
+        rm -f "out/soong/.bootstrap/bin/soong_build.real"
+    fi
+
+    # 2. Wrap prebuilt Go toolchain so all Go compilation uses single-thread, madvdontneed, & GC limits
     local go_bin="prebuilts/go/linux-x86/bin/go"
     local go_real="prebuilts/go/linux-x86/bin/go.real"
-    if [[ -f "$go_bin" && ! -f "$go_real" ]]; then
-        info "Wrapping prebuilt Go toolchain (${go_bin}) with madvdontneed & asyncpreemptoff..."
+    if [[ -f "$go_real" ]]; then
+        cat << 'EOF' > "$go_bin"
+#!/usr/bin/env bash
+export GOMAXPROCS=1
+export GODEBUG="gctrace=1,madvdontneed=1,asyncpreemptoff=1"
+export GOGC=10
+export MALLOC_ARENA_MAX=2
+exec "$(dirname "$0")/go.real" "$@"
+EOF
+        chmod +x "$go_bin"
+    elif [[ -f "$go_bin" ]]; then
+        info "Wrapping prebuilt Go toolchain (${go_bin}) with memory constraints..."
         mv "$go_bin" "$go_real"
         cat << 'EOF' > "$go_bin"
 #!/usr/bin/env bash
-export GOMAXPROCS=2
-export GODEBUG="madvdontneed=1,asyncpreemptoff=1"
-export GOGC=25
+export GOMAXPROCS=1
+export GODEBUG="gctrace=1,madvdontneed=1,asyncpreemptoff=1"
+export GOGC=10
+export MALLOC_ARENA_MAX=2
 exec "$(dirname "$0")/go.real" "$@"
 EOF
         chmod +x "$go_bin"
     fi
 
-    # 2. Patch Blueprint bootstrap generator rule to inject flags past 'env -i' and anchor directory
+    # 3. Patch Blueprint bootstrap generator rule and build.ninja via dedicated Python helper
+    cat << 'PYEOF' > "${WORKSPACE_DIR}/patch_bootstrap_helper.py"
+import os, sys, re
+
+def patch_file(path):
+    if not os.path.isfile(path):
+        return
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        content = f.read()
+
+    def repl_fn(m):
+        p = m.group(1)
+        return f'env -i GOMAXPROCS=1 GODEBUG=gctrace=1,madvdontneed=1,asyncpreemptoff=1 GOGC=10 MALLOC_ARENA_MAX=2 TMPDIR=/tmp TOP="{p}TOP" ANDROID_BUILD_TOP="{p}TOP" "{p}BUILDER"'
+
+    pat = re.compile(r'env -i\s+.*?"(\${1,2})BUILDER"')
+    new_content = pat.sub(repl_fn, content)
+    new_content = new_content.replace('`cd / && `', '`cd "$${TOP:-.}" && `')
+    new_content = new_content.replace('cd / && ', 'cd "${TOP:-.}" && ')
+
+    if new_content != content:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+        print(f"[✓] Successfully patched {path} for single-thread / GOGC=10 memory safety.")
+    else:
+        print(f"[✓] {path} already carries container memory safeguards.")
+
+if __name__ == '__main__':
+    for target in sys.argv[1:]:
+        patch_file(target)
+PYEOF
+
     local bp_file="build/blueprint/bootstrap/bootstrap.go"
     if [[ -f "$bp_file" ]]; then
-        info "Patching ${bp_file} to enforce GOMAXPROCS=2, madvdontneed, and asyncpreemptoff under env -i..."
-        python3 -c "
-import sys, re
-path = sys.argv[1]
-with open(path, 'r', encoding='utf-8') as f:
-    content = f.read()
-repl = 'env -i GOMAXPROCS=2 GODEBUG=madvdontneed=1,asyncpreemptoff=1 GOGC=25 MALLOC_ARENA_MAX=2 TMPDIR=/tmp TOP=\"\$\$TOP\" ANDROID_BUILD_TOP=\"\$\$TOP\" \"\$\$BUILDER\"'
-content = re.sub(r'env -i [^\"]*\"\$\$BUILDER\"', repl, content)
-content = re.sub(r'env -i \"\$\$BUILDER\"', repl, content)
-content = content.replace('\`cd / && \`', '\`cd \"\$\${TOP:-.}\" && \`')
-with open(path, 'w', encoding='utf-8') as f:
-    f.write(content)
-" "$bp_file" 2>/dev/null || {
-            sed -i -E 's|env -i [^"]*"\$\$BUILDER"|env -i GOMAXPROCS=2 GODEBUG=madvdontneed=1,asyncpreemptoff=1 GOGC=25 MALLOC_ARENA_MAX=2 TMPDIR=/tmp TOP="$$TOP" ANDROID_BUILD_TOP="$$TOP" "$$BUILDER"|g' "$bp_file" || true
-            sed -i 's|`cd / && `|`cd "$${TOP:-.}" && `|g' "$bp_file" || true
-        }
+        python3 "${WORKSPACE_DIR}/patch_bootstrap_helper.py" "$bp_file" || true
     fi
 
-    # 3. Patch existing out/soong/.bootstrap/build.ninja if already generated
     local ninja_bootstrap="out/soong/.bootstrap/build.ninja"
     if [[ -f "$ninja_bootstrap" ]]; then
-        info "Patching existing ${ninja_bootstrap} build rule with memory & kernel safeguards..."
-        python3 -c "
-import sys, re
-path = sys.argv[1]
-with open(path, 'r', encoding='utf-8') as f:
-    content = f.read()
-repl = 'env -i GOMAXPROCS=2 GODEBUG=madvdontneed=1,asyncpreemptoff=1 GOGC=25 MALLOC_ARENA_MAX=2 TMPDIR=/tmp TOP=\"\${TOP:-.}\" ANDROID_BUILD_TOP=\"\${TOP:-.}\" \"\$BUILDER\"'
-content = re.sub(r'env -i [^\"]*\"\$BUILDER\"', repl, content)
-content = re.sub(r'env -i \"\$BUILDER\"', repl, content)
-content = content.replace('cd / && ', 'cd \"\${TOP:-.}\" && ')
-with open(path, 'w', encoding='utf-8') as f:
-    f.write(content)
-" "$ninja_bootstrap" 2>/dev/null || {
-            sed -i -E 's|env -i [^"]*"\$BUILDER"|env -i GOMAXPROCS=2 GODEBUG=madvdontneed=1,asyncpreemptoff=1 GOGC=25 MALLOC_ARENA_MAX=2 TMPDIR=/tmp TOP="${TOP:-.}" ANDROID_BUILD_TOP="${TOP:-.}" "\$BUILDER"|g' "$ninja_bootstrap" || true
-            sed -i 's|cd / && |cd "${TOP:-.}" && |g' "$ninja_bootstrap" || true
-        }
+        python3 "${WORKSPACE_DIR}/patch_bootstrap_helper.py" "$ninja_bootstrap" || true
     fi
 
-    # 4. Wrap soong_build binary itself if it exists (dual-lock defense)
-    local sb_bin="out/soong/.bootstrap/bin/soong_build"
-    local sb_real="out/soong/.bootstrap/bin/soong_build.real"
-    if [[ -f "$sb_bin" && ! -f "$sb_real" ]]; then
-        if ! head -c 2 "$sb_bin" 2>/dev/null | grep -q '#!'; then
-            info "Wrapping ${sb_bin} binary with memory & asyncpreemptoff constraints..."
-            mv "$sb_bin" "$sb_real"
-            cat << 'EOF' > "$sb_bin"
-#!/usr/bin/env bash
-export GOMAXPROCS=2
-export GODEBUG="madvdontneed=1,asyncpreemptoff=1"
-export GOGC=25
-export MALLOC_ARENA_MAX=2
-export TMPDIR=/tmp
-export TOP="${TOP:-/config/OFRP/fox_12.1}"
-export ANDROID_BUILD_TOP="${TOP:-/config/OFRP/fox_12.1}"
-exec "$(dirname "$0")/soong_build.real" "$@"
-EOF
-            chmod +x "$sb_bin"
-        fi
-    fi
+    rm -f "${WORKSPACE_DIR}/patch_bootstrap_helper.py"
 }
 
 setup_build_environment() {
@@ -474,14 +470,14 @@ setup_build_environment() {
     export FOX_TARGET_DEVICES="${DEVICE_ALIAS},${DEVICE_CODENAME},sweet"
     export TARGET_DEVICE_ALT="${DEVICE_ALIAS},${DEVICE_CODENAME},sweet"
 
-    # OS limits for heavy compilation
-    ulimit -s unlimited 2>/dev/null || true
+    # OS limits for heavy compilation (64MB stack avoids Linux kernel mmap layout regression)
+    ulimit -s 65536 2>/dev/null || true
     ulimit -n 65535 2>/dev/null || true
 
     # Memory & Concurrency Safeguards for Soong & Compiler
-    export GOMAXPROCS=2
-    export GODEBUG="madvdontneed=1,asyncpreemptoff=1"
-    export GOGC=25
+    export GOMAXPROCS=1
+    export GODEBUG="gctrace=1,madvdontneed=1,asyncpreemptoff=1"
+    export GOGC=10
     export MALLOC_ARENA_MAX=2
     export NINJA_ARGS="-j${JOBS}"
 
@@ -530,46 +526,6 @@ compile_recovery() {
     export TOP="${WORKSPACE_DIR}"
     export ANDROID_BUILD_TOP="${WORKSPACE_DIR}"
 
-    # Direct safe pre-pass for soong_build:
-    # If soong_build binary is compiled and blueprint inputs exist, generate build.ninja directly
-    # with unbreakable memory, thread, and Go kernel safeguards!
-    local sb_exec="${WORKSPACE_DIR}/out/soong/.bootstrap/bin/soong_build"
-    local bp_list="${WORKSPACE_DIR}/out/.module_paths/Android.bp.list"
-    local glob_file="${WORKSPACE_DIR}/out/soong/.bootstrap/build-globs.ninja"
-    local glob_file_alt="${WORKSPACE_DIR}/out/soong/.bootstrap/build-globs.ninja"
-    if [[ -f "$glob_file_alt" ]]; then
-        glob_file="$glob_file_alt"
-    fi
-    local avail_env="${WORKSPACE_DIR}/out/soong/soong.environment.available"
-    local used_env="${WORKSPACE_DIR}/out/soong/soong.environment.used"
-
-    if [[ -x "$sb_exec" && -f "$bp_list" && -f "$glob_file" && -f "$avail_env" && ! -f "${WORKSPACE_DIR}/out/soong/build.ninja" ]]; then
-        info "Executing optimized direct pre-pass for soong_build..."
-        (
-            cd "${WORKSPACE_DIR}"
-            env -i \
-                GOMAXPROCS=2 \
-                GODEBUG="madvdontneed=1,asyncpreemptoff=1" \
-                GOGC=25 \
-                MALLOC_ARENA_MAX=2 \
-                TMPDIR=/tmp \
-                TOP="${WORKSPACE_DIR}" \
-                ANDROID_BUILD_TOP="${WORKSPACE_DIR}" \
-                "$sb_exec" \
-                    --top "${WORKSPACE_DIR}" \
-                    --out "${WORKSPACE_DIR}/out/soong" \
-                    -n "${WORKSPACE_DIR}/out" \
-                    -d "${WORKSPACE_DIR}/out/soong/build.ninja.d" \
-                    -t \
-                    -l "$bp_list" \
-                    -globFile "$glob_file" \
-                    -o "${WORKSPACE_DIR}/out/soong/build.ninja" \
-                    --available_env "$avail_env" \
-                    --used_env "$used_env" \
-                    Android.bp
-        ) && success "Direct soong_build succeeded! out/soong/build.ninja is ready." || warn "Direct soong_build pre-pass will fall back to Ninja bootstrap."
-    fi
-
     # Envsetup and vendorsetup scripts contain subshells, grep checks, and tests
     # that return non-zero exit codes. Disable -e during envsetup and lunch.
     set +e
@@ -600,6 +556,9 @@ compile_recovery() {
     if [[ $lunch_rc -ne 0 ]]; then
         die "Failed to lunch any recovery target for ${DEVICE_CODENAME} / ${DEVICE_ALIAS}."
     fi
+
+    # Re-enforce Soong patches in case lunch regenerated .bootstrap/build.ninja
+    patch_soong_memory
 
     if [[ "$RUN_CLEAN" == "true" ]]; then
         info "Cleaning prior build output..."
