@@ -2,6 +2,7 @@
 #
 # OrangeFox Recovery Project (OFRP) Automated Local Build Script for Redmi Note 12 Pro 4G (sweet2 / sweet_k6a)
 # Base: fox_12.1 (Android 12.1 / TWRP 12.1 minimal manifest)
+# Device Tree: MiDoNaSR545/device_xiaomi_sweet_k6a-OFOX (branch: fox-12.1)
 # Maintainer: rony1duet
 # Supported OS: Linux (Ubuntu 20.04/22.04 LTS, Debian 11/12, WSL2, Docker)
 #
@@ -14,7 +15,7 @@
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.3.1"
+readonly SCRIPT_VERSION="1.4.0"
 readonly RECOVERY_NAME="OrangeFox"
 readonly FOX_BRANCH="12.1"
 readonly SYNC_REPO_URL="https://gitlab.com/OrangeFox/sync.git"
@@ -37,7 +38,7 @@ else
     WORKSPACE_DIR="$(pwd)/fox_12.1"
 fi
 
-# Recommended device tree specifically authored for sweet_k6a / sweet2 (Redmi Note 12 Pro 4G)
+# MiDoNaSR545 repository specifically authored for sweet_k6a / sweet2 (Redmi Note 12 Pro 4G)
 DEVICE_TREE_URL="${DEVICE_TREE_URL:-https://github.com/MiDoNaSR545/device_xiaomi_sweet_k6a-OFOX.git}"
 DEVICE_TREE_BRANCH="${DEVICE_TREE_BRANCH:-fox-12.1}"
 LUNCH_TARGET="twrp_${DEVICE_CODENAME}-eng"
@@ -242,6 +243,10 @@ sync_orangefox() {
         info "Cloning official OrangeFox synchronization tool from GitLab..."
         git clone --depth=1 "${SYNC_REPO_URL}" "${sync_tool_dir}"
 
+        # Copy patches to workspace directory as well to ensure patch files exist in both locations
+        mkdir -p "${WORKSPACE_DIR}/patches"
+        cp -rf "${sync_tool_dir}/patches/"* "${WORKSPACE_DIR}/patches/" 2>/dev/null || true
+
         info "Synchronizing OrangeFox ${FOX_BRANCH} minimal manifest into ${WORKSPACE_DIR}..."
         (
             cd "${sync_tool_dir}"
@@ -255,9 +260,9 @@ sync_orangefox() {
     fi
 }
 
-# 4. Device Recovery Tree Setup
+# 4. Device Recovery Tree Setup (Using MiDoNaSR545 repository)
 setup_device_tree() {
-    info "Setting up recovery device tree for ${DEVICE_ALIAS} (${DEVICE_CODENAME})..."
+    info "Setting up recovery device tree for ${DEVICE_ALIAS} (${DEVICE_CODENAME}) using MiDoNaSR545 repo..."
     cd "${WORKSPACE_DIR}"
 
     local target_dir="device/${DEVICE_BRAND}/${DEVICE_CODENAME}"
@@ -271,7 +276,7 @@ setup_device_tree() {
     elif [[ -d "${target_dir}" ]]; then
         info "Device tree folder ${target_dir} exists."
     else
-        info "Cloning device tree from ${DEVICE_TREE_URL} (branch: ${DEVICE_TREE_BRANCH})..."
+        info "Cloning MiDoNaSR device tree from ${DEVICE_TREE_URL} (branch: ${DEVICE_TREE_BRANCH})..."
         mkdir -p "device/${DEVICE_BRAND}"
         git clone "${DEVICE_TREE_URL}" -b "${DEVICE_TREE_BRANCH}" "${target_dir}"
     fi
@@ -306,7 +311,7 @@ setup_device_tree() {
         fi
     fi
 
-    success "Device tree configured in ${target_dir} (aliased to ${alias_dir})."
+    success "MiDoNaSR545 device tree configured in ${target_dir} (aliased to ${alias_dir})."
 }
 
 # 5. Ccache & Environment Setup
