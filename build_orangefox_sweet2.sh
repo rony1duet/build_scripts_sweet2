@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 #
 # OrangeFox Recovery Project (OFRP) Automated Local Build Script for Redmi Note 12 Pro 4G (sweet2 / sweet_k6a)
-# Target Base: fox_12.1 (Android 12.1 / TWRP 12.1 minimal manifest)
+# Base: fox_12.1 (Android 12.1 / TWRP 12.1 minimal manifest)
 # Maintainer: rony1duet
-# Supported OS: Linux (Ubuntu 20.04/22.04 LTS, Debian 11/12, WSL2)
+# Supported OS: Linux (Ubuntu 20.04/22.04 LTS, Debian 11/12, WSL2, Docker)
 #
 # Usage via curl:
 #   curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/orangefox/orangefox_local.sh | bash
 #
 # Or with options:
-#   curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/orangefox/orangefox_local.sh | bash -s -- --install-deps -j8
+#   curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/orangefox/orangefox_local.sh | bash -s -- -j8
 #
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.2.0"
+readonly SCRIPT_VERSION="1.3.0"
 readonly RECOVERY_NAME="OrangeFox"
 readonly FOX_BRANCH="12.1"
-readonly MANIFEST_URL="https://gitlab.com/OrangeFox/manifest.git"
+readonly SYNC_REPO_URL="https://gitlab.com/OrangeFox/sync.git"
 readonly DEVICE_CODENAME="sweet_k6a"
 readonly DEVICE_ALIAS="sweet2"
 readonly DEVICE_BRAND="xiaomi"
@@ -161,9 +161,17 @@ check_environment() {
         fi
     fi
 
+    # Ensure git identity exists to avoid repo init prompts
+    if [[ -z "$(git config --global user.email 2>/dev/null || true)" ]]; then
+        git config --global user.email "rony1duet@users.noreply.github.com"
+    fi
+    if [[ -z "$(git config --global user.name 2>/dev/null || true)" ]]; then
+        git config --global user.name "rony1duet"
+    fi
+
     # Check for missing basic tools
     local missing=()
-    for tool in git curl repo bison flex python3 ccache; do
+    for tool in git curl repo bison flex python3 ccache patch; do
         command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
     done
 
@@ -188,7 +196,7 @@ install_dependencies() {
         aria2 bc bison build-essential ccache curl flex g++-multilib gcc-multilib git
         git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev libelf-dev
         libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils
-        lz4 liblz4-tool lzop openjdk-11-jdk pngcrush python3 python-is-python3 rsync
+        lz4 liblz4-tool lzop openjdk-11-jdk patch pngcrush python3 python-is-python3 rsync
         schedtool squashfs-tools unzip xsltproc zip zlib1g-dev
     )
 
@@ -216,18 +224,29 @@ install_dependencies() {
     success "Build dependencies installed and verified."
 }
 
-# 3. OrangeFox Manifest Sync
+# 3. OrangeFox Manifest Sync (Using official sync tool and patches)
 sync_orangefox() {
     info "Entering OrangeFox workspace: ${WORKSPACE_DIR}..."
     cd "${WORKSPACE_DIR}"
 
-    if [[ ! -d ".repo" || "$FORCE_SYNC" == "true" ]]; then
-        info "Initializing OrangeFox minimal manifest (branch: fox_${FOX_BRANCH})..."
-        repo init -u "${MANIFEST_URL}" -b "fox_${FOX_BRANCH}" --depth=1 --git-lfs
+    # If build/envsetup.sh does not exist or force-sync requested, perform fresh sync
+    if [[ ! -f "${WORKSPACE_DIR}/build/envsetup.sh" || "$FORCE_SYNC" == "true" ]]; then
+        # Clean any broken/partial .repo from previous failed attempts
+        if [[ -d "${WORKSPACE_DIR}/.repo" && ! -f "${WORKSPACE_DIR}/build/envsetup.sh" ]]; then
+            warn "Cleaning broken/partial .repo from prior failed init..."
+            rm -rf "${WORKSPACE_DIR}/.repo"
+        fi
 
-        info "Synchronizing sources with ${JOBS} parallel threads..."
-        repo sync -c -j"${JOBS}" --force-sync --no-clone-bundle --no-tags
-        success "OrangeFox source sync completed."
+        local sync_tool_dir="/tmp/ofox_sync_$$"
+        rm -rf "${sync_tool_dir}"
+        info "Cloning official OrangeFox synchronization tool from GitLab..."
+        git clone --depth=1 "${SYNC_REPO_URL}" "${sync_tool_dir}"
+
+        info "Synchronizing OrangeFox ${FOX_BRANCH} minimal manifest into ${WORKSPACE_DIR}..."
+        bash "${sync_tool_dir}/orangefox_sync.sh" --branch "${FOX_BRANCH}" --path "${WORKSPACE_DIR}" --ssh 0
+
+        rm -rf "${sync_tool_dir}"
+        success "OrangeFox source sync and patch completed."
     else
         info "Existing OrangeFox source tree detected in ${WORKSPACE_DIR}. Skipping sync (use --sync to force)."
     fi
@@ -331,7 +350,9 @@ setup_build_environment() {
     # OrangeFox UI & Addons
     export OF_USE_GREEN_LED=0
     export FOX_ENABLE_APP_MANAGER=1
-    export FOX_USE_SPECIFIC_MAGISK_ZIP="${WORKSPACE_DIR}/device/${DEVICE_BRAND}/${DEVICE_CODENAME}/addon/Magisk-v27.0.zip"
+    if [[ -f "${WORKSPACE_DIR}/device/${DEVICE_BRAND}/${DEVICE_CODENAME}/addon/Magisk-v27.0.zip" ]]; then
+        export FOX_USE_SPECIFIC_MAGISK_ZIP="${WORKSPACE_DIR}/device/${DEVICE_BRAND}/${DEVICE_CODENAME}/addon/Magisk-v27.0.zip"
+    fi
 }
 
 # 6. Compilation
