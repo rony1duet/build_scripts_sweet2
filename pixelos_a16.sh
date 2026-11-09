@@ -10,6 +10,12 @@ set -eo pipefail
 readonly ROM_MANIFEST_BRANCH="sixteen-qpr2"
 readonly DEVICE_BRANCH="PixelOS-16-QPR2"
 readonly DEVICE_CODENAME="sweet2"
+readonly SCRIPT_VERSION="1.3.7"
+
+# Ensure legacy check-api bypass is deactivated and source stubs are allowed
+unset WITHOUT_CHECK_API
+export WITHOUT_CHECK_API=false
+export BUILD_FROM_SOURCE_STUB=true
 
 info() { printf "\033[0;34m==>\033[0m \033[1m%s\033[0m\n" "$*"; }
 warn() { printf "\033[1;33m[!]\033[0m %s\n" "$*"; }
@@ -151,6 +157,8 @@ setup_environment() {
     export DONT_INSTALL_DEXPREOPT_TESTS=true
     export SKIP_BOOT_JARS_CHECK=true
     unset WITHOUT_CHECK_API
+    export WITHOUT_CHECK_API=false
+    export BUILD_FROM_SOURCE_STUB=true
     export DONT_UNCOMPRESS_PRIV_APPS_DEXS=true
 
     export GOGC=40
@@ -182,9 +190,19 @@ setup_gcam() {
 build_target() {
     info "Compiling PixelOS ${DEVICE_CODENAME}..."
 
+    # Deactivate WITHOUT_CHECK_API and allow building stubs from source
+    unset WITHOUT_CHECK_API
+    export WITHOUT_CHECK_API=false
+    export BUILD_FROM_SOURCE_STUB=true
+
     # shellcheck source=/dev/null
     source build/envsetup.sh
     breakfast "${DEVICE_CODENAME}" || die "breakfast failed"
+
+    unset WITHOUT_CHECK_API
+    export WITHOUT_CHECK_API=false
+    export BUILD_FROM_SOURCE_STUB=true
+
     m pixelos || die "Build failed"
 }
 

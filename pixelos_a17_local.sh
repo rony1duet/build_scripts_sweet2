@@ -8,11 +8,16 @@
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.3.6"
+readonly SCRIPT_VERSION="1.3.7"
 readonly ROM_NAME="PixelOS"
 readonly ROM_MANIFEST_BRANCH="seventeen"
 readonly DEVICE_BRANCH="PixelOS-17-base"
 readonly DEVICE_CODENAME="sweet2"
+
+# Ensure legacy check-api bypass is deactivated and source stubs are allowed
+unset WITHOUT_CHECK_API
+export WITHOUT_CHECK_API=false
+export BUILD_FROM_SOURCE_STUB=true
 
 WORKSPACE_DIR="$(pwd)"
 AUTO_UPLOAD=true
@@ -519,6 +524,8 @@ setup_environment() {
     export DONT_INSTALL_DEXPREOPT_TESTS=true
     export SKIP_BOOT_JARS_CHECK=true
     unset WITHOUT_CHECK_API
+    export WITHOUT_CHECK_API=false
+    export BUILD_FROM_SOURCE_STUB=true
     export DONT_UNCOMPRESS_PRIV_APPS_DEXS=true
     export TARGET_RELEASE="${TARGET_RELEASE:-trunk_staging}"
 
@@ -637,7 +644,10 @@ setup_gcam() {
     [[ -f "vendor/GCam_sweet2/system/product/app/GoogleCameraEng/GoogleCameraEng.apk" ]] || die "GoogleCameraEng.apk not found"
 
     # Invalidate stale GCam prebuilt check stamps so Soong re-evaluates check_prebuilt_presigned_apk
-    rm -rf out/soong/.intermediates/vendor/GCam_sweet2 2>/dev/null || true
+    rm -rf out/soong/.intermediates/vendor/GCam_sweet2 \
+           out/soong/.bootstrap \
+           out/soong/build.*.ninja \
+           out/soong/soong.*.variables 2>/dev/null || true
 
     # Ensure GCam Android.bp skips preprocessed compressed dex validation for presigned APK
     if [[ -f "vendor/GCam_sweet2/Android.bp" ]] && ! grep -q "skip_preprocessed_apk_checks" vendor/GCam_sweet2/Android.bp; then
@@ -647,6 +657,11 @@ setup_gcam() {
 
 build_target() {
     info "Starting build for ${DEVICE_CODENAME}..."
+
+    # Deactivate WITHOUT_CHECK_API and allow building stubs from source
+    unset WITHOUT_CHECK_API
+    export WITHOUT_CHECK_API=false
+    export BUILD_FROM_SOURCE_STUB=true
 
     mkdir -p "${WORKSPACE_DIR}/out"
 
