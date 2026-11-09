@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
 #
-# OrangeFox Recovery Project (OFRP) Build Script for Redmi Note 12 Pro 4G (sweet2)
-# Target Base: fox_12.1 (Android 12.1 / TWRP 12.1 base)
+# OrangeFox Recovery Project (OFRP) Automated Local Build Script for Redmi Note 12 Pro 4G (sweet2)
+# Base: fox_12.1 (Android 12.1 / TWRP 12.1 minimal manifest)
 # Maintainer: rony1duet
-# Supported Environments: Linux (Ubuntu 20.04/22.04, Debian 11/12, WSL2)
+# Supported OS: Linux (Ubuntu 20.04/22.04 LTS, Debian 11/12, WSL2)
+#
+# Usage via curl:
+#   curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/orangefox/orangefox_local.sh | bash
+#
+# Or with options:
+#   curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/orangefox/orangefox_local.sh | bash -s -- --install-deps
 #
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.0.0"
+readonly SCRIPT_VERSION="1.1.0"
 readonly RECOVERY_NAME="OrangeFox"
 readonly FOX_BRANCH="12.1"
 readonly MANIFEST_URL="https://gitlab.com/OrangeFox/manifest.git"
@@ -22,8 +28,14 @@ success() { printf "\033[0;32m[✓]\033[0m \033[1m%s\033[0m\n" "$*"; }
 warn()    { printf "\033[1;33m[!]\033[0m %s\n" "$*"; }
 die()     { printf "\033[0;31m[x]\033[0m %s\n" "$*" >&2; exit 1; }
 
-# Default Parameters
-WORKSPACE_DIR="${FOX_WORKSPACE:-${HOME}/fox_12.1}"
+# Determine Workspace Directory
+# If running inside a Windows mount (/mnt/c, /mnt/g), automatically switch to native ext4 ~/fox_12.1
+if [[ "$(pwd)" =~ ^/mnt/[a-zA-Z]/ || "$(pwd)" == "/root" ]]; then
+    WORKSPACE_DIR="${HOME}/fox_12.1"
+else
+    WORKSPACE_DIR="$(pwd)/fox_12.1"
+fi
+
 DEVICE_TREE_URL="${DEVICE_TREE_URL:-https://github.com/basamaryan/android_device_xiaomi_sweet-TWRP.git}"
 DEVICE_TREE_BRANCH="${DEVICE_TREE_BRANCH:-fox_12.1}"
 LUNCH_TARGET="twrp_${DEVICE_CODENAME}-eng"
@@ -35,35 +47,6 @@ RUN_CLEAN=false
 AUTO_UPLOAD=true
 
 # Parse Command Line Options
-print_help() {
-    cat << EOF
-OrangeFox Recovery Project (OFRP) Builder for ${DEVICE_CODENAME}
-Version: ${SCRIPT_VERSION}
-
-Usage: $(basename "$0") [options] [workspace_dir]
-
-Options:
-  -i, --install-deps       Install all required build tools and libraries (Ubuntu/Debian)
-  -s, --sync               Force re-sync of the OrangeFox manifest and repositories
-  -c, --clean              Execute 'mka clean' before starting the build
-  -j, --jobs=<N>           Number of parallel build threads (default: ${JOBS})
-  --tree=<url>             Git repository URL for the device recovery tree
-  --tree-branch=<branch>   Branch for the device recovery tree (default: ${DEVICE_TREE_BRANCH})
-  --no-upload              Skip automatic upload to Pixeldrain after a successful build
-  -h, --help               Display this help text and exit
-
-Environment Variables:
-  FOX_WORKSPACE            Directory where the OrangeFox source tree will be located
-  DEVICE_TREE_URL          Git URL for the recovery device tree
-  DEVICE_TREE_BRANCH       Branch to use for the recovery device tree
-  PIXELDRAIN_API_KEY       Pixeldrain API key for uploading the output recovery zip
-
-Example:
-  $(basename "$0") --install-deps --sync ~/fox_12.1
-EOF
-    exit 0
-}
-
 for arg in "$@"; do
     case "$arg" in
         -i|--install-deps)
@@ -88,122 +71,135 @@ for arg in "$@"; do
             AUTO_UPLOAD=false
             ;;
         -h|--help)
-            print_help
+            cat << EOF
+OrangeFox Recovery Project (OFRP) Builder for ${DEVICE_CODENAME}
+Version: ${SCRIPT_VERSION}
+
+Usage: curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/orangefox/orangefox_local.sh | bash -s -- [options] [workspace_dir]
+
+Options:
+  -i, --install-deps       Install all required packages and tools via apt-get
+  -s, --sync               Force re-sync of the OrangeFox manifest
+  -c, --clean              Execute 'mka clean' before starting compilation
+  -j, --jobs=<N>           Number of parallel build threads (default: ${JOBS})
+  --tree=<url>             Git repository URL for device recovery tree
+  --tree-branch=<branch>   Branch for device recovery tree (default: ${DEVICE_TREE_BRANCH})
+  --no-upload              Skip automatic upload to Pixeldrain
+  -h, --help               Display this help text and exit
+EOF
+            exit 0
             ;;
         *)
-            if [[ "$arg" != -* ]]; then
+            if [[ "$arg" != -* && -d "$arg" ]]; then
                 WORKSPACE_DIR="$arg"
             fi
             ;;
     esac
 done
 
-# Ensure POSIX / Linux Environment
+# Failure Diagnostics Trap
+cleanup_on_error() {
+    local rc=$?
+    if [[ $rc -ne 0 ]]; then
+        printf "\n\033[0;31m[x]\033[0m OrangeFox build failed with exit code %s.\n" "$rc"
+        echo "Check build output above for detailed errors."
+    fi
+}
+trap cleanup_on_error EXIT
+
+# 1. Environment & Architecture Validation
 check_environment() {
     info "Validating host build environment..."
 
     if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
-        die "Native Windows / Git-Bash detected. Android and OrangeFox recovery cannot be compiled natively on Windows. Please install WSL2 (Ubuntu 22.04 LTS) and run this script inside WSL2."
+        die "Native Windows detected. Android and OrangeFox recovery cannot be compiled on Windows natively. Please install WSL2 (Ubuntu 22.04 LTS) and run this command inside Ubuntu WSL2."
     fi
 
     if grep -qi "microsoft" /proc/version 2>/dev/null; then
         info "Running under Windows Subsystem for Linux (WSL2)."
-        
-        # Warn if working inside a Windows DrvFs mount (/mnt/c, /mnt/g, etc.)
         if [[ "$WORKSPACE_DIR" =~ ^/mnt/[a-zA-Z]/ ]]; then
-            warn "WARNING: Your workspace is set to a Windows NTFS drive (${WORKSPACE_DIR})."
-            warn "Building Android / Recovery on Windows DrvFs (/mnt/*) causes severe I/O slowdowns, case-insensitivity issues, and broken symlinks."
-            warn "It is STRONGLY recommended to use native Linux ext4 storage inside WSL2 (e.g. ~/fox_12.1)."
-            read -rp "Do you want to switch workspace to ~/fox_12.1? [Y/n] " choice
-            choice="${choice:-Y}"
-            if [[ "$choice" =~ ^[Yy]$ ]]; then
-                WORKSPACE_DIR="${HOME}/fox_12.1"
-                info "Switched workspace to ${WORKSPACE_DIR}"
+            warn "Current directory is on Windows NTFS (/mnt/*). Switching workspace to native Linux ext4 ~/fox_12.1 for performance and case-sensitivity."
+            WORKSPACE_DIR="${HOME}/fox_12.1"
+        fi
+    fi
+
+    mkdir -p "${WORKSPACE_DIR}"
+    info "Workspace directory: ${WORKSPACE_DIR}"
+
+    # Verify Free Storage (Minimum 45 GB required)
+    local avail_gb
+    avail_gb=$(df -BG "${WORKSPACE_DIR}" 2>/dev/null | awk 'NR==2 {gsub("G",""); print $4}' | tr -dc '0-9')
+    if [[ -n "$avail_gb" && "$avail_gb" -lt 40 ]]; then
+        warn "Free disk space is ${avail_gb} GB. OrangeFox minimal manifest requires at least ~45 GB."
+    elif [[ -n "$avail_gb" ]]; then
+        success "Disk space check passed: ${avail_gb} GB available."
+    fi
+
+    # Check RAM and configure Swap if needed
+    local total_ram_mb total_swap_mb
+    total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
+    total_swap_mb=$(free -m | awk '/^Swap:/{print $2}')
+    info "Host RAM: ${total_ram_mb} MB | Swap: ${total_swap_mb} MB"
+
+    if [[ "$total_ram_mb" -lt 12000 && "$total_swap_mb" -lt 8000 ]]; then
+        warn "Low RAM + Swap detected (${total_ram_mb} MB RAM / ${total_swap_mb} MB Swap)."
+        if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+            info "Automatically configuring 16 GB swap file to prevent OOM errors..."
+            sudo fallocate -l 16G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=16384 2>/dev/null || true
+            if [[ -f /swapfile ]]; then
+                sudo chmod 600 /swapfile
+                sudo mkswap /swapfile 2>/dev/null || true
+                sudo swapon /swapfile 2>/dev/null || true
+                success "16 GB swap file successfully activated."
             fi
         fi
     fi
 
-    # Check available storage (Minimum 45 GB required for minimal recovery manifest)
-    local target_check="${WORKSPACE_DIR}"
-    [[ -d "$target_check" ]] || target_check="$(dirname "$target_check")"
-    [[ -d "$target_check" ]] || target_check="${HOME}"
+    # Check for missing basic tools
+    local missing=()
+    for tool in git curl repo bison flex python3 ccache; do
+        command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+    done
 
-    local avail_gb
-    avail_gb=$(df -BG "$target_check" | awk 'NR==2 {gsub("G",""); print $4}')
-    if [[ -n "$avail_gb" && "$avail_gb" -lt 40 ]]; then
-        warn "Available disk space is ${avail_gb} GB. OrangeFox minimal manifest requires at least ~45 GB."
-        warn "You may run out of disk space during compilation!"
-    else
-        success "Disk space check passed: ${avail_gb} GB available in ${target_check}."
-    fi
-
-    # Check RAM and Swap
-    local total_ram_mb
-    total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
-    local total_swap_mb
-    total_swap_mb=$(free -m | awk '/^Swap:/{print $2}')
-
-    info "System RAM: ${total_ram_mb} MB | Swap: ${total_swap_mb} MB"
-    if [[ "$total_ram_mb" -lt 12000 && "$total_swap_mb" -lt 8000 ]]; then
-        warn "Your machine has under 12 GB RAM and insufficient swap space."
-        warn "Compiling with high parallelism may trigger the Linux OOM (Out Of Memory) killer."
-        warn "Consider adding a 16 GB swap file or reducing jobs (-j2 or -j4)."
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        info "Missing build tools: ${missing[*]}. Triggering automatic installation..."
+        INSTALL_DEPS=true
     fi
 }
 
-# Install Build Dependencies (Debian / Ubuntu / WSL2)
+# 2. Dependency Installation
 install_dependencies() {
-    info "Installing Android & OrangeFox build dependencies..."
+    info "Installing Android & OrangeFox build dependencies via apt-get..."
 
     if ! command -v apt-get >/dev/null 2>&1; then
-        warn "Package manager 'apt-get' not found. Please ensure all required dependencies are installed manually."
+        warn "apt-get package manager not found. Please ensure all build dependencies are installed manually."
         return 0
     fi
 
-    sudo apt-get update
-    sudo apt-get install -y \
-        aria2 \
-        bc \
-        bison \
-        build-essential \
-        ccache \
-        curl \
-        flex \
-        g++-multilib \
-        gcc-multilib \
-        git \
-        git-lfs \
-        gnupg \
-        gperf \
-        imagemagick \
-        lib32ncurses5-dev \
-        lib32readline-dev \
-        lib32z1-dev \
-        libelf-dev \
-        liblz4-tool \
-        libncurses5 \
-        libncurses5-dev \
-        libsdl1.2-dev \
-        libssl-dev \
-        libxml2 \
-        libxml2-utils \
-        lzop \
-        openjdk-11-jdk \
-        pngcrush \
-        python3 \
-        python-is-python3 \
-        rsync \
-        schedtool \
-        squashfs-tools \
-        unzip \
-        xsltproc \
-        zip \
-        zlib1g-dev
+    sudo apt-get update -y || true
+
+    local pkgs=(
+        aria2 bc bison build-essential ccache curl flex g++-multilib gcc-multilib git
+        git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev libelf-dev
+        libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils
+        lz4 liblz4-tool lzop openjdk-11-jdk pngcrush python3 python-is-python3 rsync
+        schedtool squashfs-tools unzip xsltproc zip zlib1g-dev
+    )
+
+    local to_install=()
+    for pkg in "${pkgs[@]}"; do
+        if apt-cache policy "$pkg" 2>/dev/null | grep -q 'Candidate: [^(\n]'; then
+            to_install+=("$pkg")
+        fi
+    done
+
+    if [[ ${#to_install[@]} -gt 0 ]]; then
+        sudo apt-get install -y "${to_install[@]}" || true
+    fi
 
     # Ensure repo command is installed
     if ! command -v repo >/dev/null 2>&1; then
-        info "Installing Google repo tool..."
-        sudo mkdir -p /usr/local/bin
+        info "Installing Google repo tool to /usr/local/bin/repo..."
         sudo curl -s https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo
         sudo chmod a+rx /usr/local/bin/repo
     fi
@@ -211,28 +207,27 @@ install_dependencies() {
     # Configure Git LFS
     git lfs install 2>/dev/null || true
 
-    success "Dependencies successfully installed."
+    success "Build dependencies installed and verified."
 }
 
-# Sync OrangeFox Source Manifest
+# 3. OrangeFox Manifest Sync
 sync_orangefox() {
-    info "Setting up OrangeFox source workspace at ${WORKSPACE_DIR}..."
-    mkdir -p "${WORKSPACE_DIR}"
+    info "Entering OrangeFox workspace: ${WORKSPACE_DIR}..."
     cd "${WORKSPACE_DIR}"
 
     if [[ ! -d ".repo" || "$FORCE_SYNC" == "true" ]]; then
         info "Initializing OrangeFox minimal manifest (branch: fox_${FOX_BRANCH})..."
         repo init -u "${MANIFEST_URL}" -b "fox_${FOX_BRANCH}" --depth=1 --git-lfs
 
-        info "Syncing source repositories (jobs: ${JOBS})..."
+        info "Synchronizing sources with ${JOBS} parallel threads..."
         repo sync -c -j"${JOBS}" --force-sync --no-clone-bundle --no-tags
         success "OrangeFox source sync completed."
     else
-        info "Existing OrangeFox source tree detected in ${WORKSPACE_DIR}. Skipping full sync (use --sync to force)."
+        info "Existing OrangeFox source tree detected in ${WORKSPACE_DIR}. Skipping sync (use --sync to force)."
     fi
 }
 
-# Setup Device Recovery Tree
+# 4. Device Recovery Tree Setup
 setup_device_tree() {
     info "Setting up recovery device tree for ${DEVICE_CODENAME}..."
     cd "${WORKSPACE_DIR}"
@@ -240,62 +235,65 @@ setup_device_tree() {
     local target_dir="device/${DEVICE_BRAND}/${DEVICE_CODENAME}"
 
     if [[ -d "${target_dir}/.git" ]]; then
-        info "Device tree already present in ${target_dir}. Fetching latest commits..."
+        info "Device tree already present in ${target_dir}. Updating latest commits..."
         git -C "${target_dir}" fetch origin "${DEVICE_TREE_BRANCH}" || true
         git -C "${target_dir}" checkout "${DEVICE_TREE_BRANCH}" || true
         git -C "${target_dir}" pull origin "${DEVICE_TREE_BRANCH}" || true
     elif [[ -d "${target_dir}" ]]; then
-        info "Device tree folder ${target_dir} exists (local copy)."
+        info "Device tree folder ${target_dir} exists."
     else
         info "Cloning device tree from ${DEVICE_TREE_URL} (branch: ${DEVICE_TREE_BRANCH})..."
         mkdir -p "device/${DEVICE_BRAND}"
         git clone "${DEVICE_TREE_URL}" -b "${DEVICE_TREE_BRANCH}" "${target_dir}"
     fi
 
-    # Validate device makefile naming
-    if [[ ! -f "${target_dir}/AndroidProducts.mk" && ! -f "${target_dir}/twrp_${DEVICE_CODENAME}.mk" && ! -f "${target_dir}/fox_${DEVICE_CODENAME}.mk" ]]; then
-        warn "No standard twrp_${DEVICE_CODENAME}.mk or fox_${DEVICE_CODENAME}.mk found in ${target_dir}."
+    # Alias sweet to sweet2 if needed
+    if [[ ! -f "${target_dir}/twrp_${DEVICE_CODENAME}.mk" && ! -f "${target_dir}/fox_${DEVICE_CODENAME}.mk" ]]; then
         if [[ -f "${target_dir}/twrp_sweet.mk" ]]; then
-            info "Found twrp_sweet.mk. Creating alias for ${DEVICE_CODENAME}..."
-            cp "${target_dir}/twrp_sweet.mk" "${target_dir}/twrp_${DEVICE_CODENAME}.mk"
+            info "Aliasing twrp_sweet.mk -> twrp_${DEVICE_CODENAME}.mk for ${DEVICE_CODENAME}..."
+            sed -e "s/sweet/sweet2/g" -e "s/Redmi Note 10 Pro/Redmi Note 12 Pro 4G/g" \
+                "${target_dir}/twrp_sweet.mk" > "${target_dir}/twrp_${DEVICE_CODENAME}.mk"
+        fi
+    fi
+
+    if [[ -f "${target_dir}/AndroidProducts.mk" ]]; then
+        if ! grep -q "twrp_${DEVICE_CODENAME}.mk" "${target_dir}/AndroidProducts.mk"; then
+            sed -i "/PRODUCT_MAKEFILES/a \    \$(LOCAL_DIR)/twrp_${DEVICE_CODENAME}.mk \\\\" "${target_dir}/AndroidProducts.mk" || true
+            sed -i "/COMMON_LUNCH_CHOICES/a \    twrp_${DEVICE_CODENAME}-eng \\\\" "${target_dir}/AndroidProducts.mk" || true
         fi
     fi
 
     success "Device tree configured in ${target_dir}."
 }
 
-# Setup Ccache for Fast Rebuilds
-setup_ccache() {
+# 5. Ccache & Environment Setup
+setup_build_environment() {
+    info "Configuring build environment and ccache..."
+
     export USE_CCACHE=1
     export CCACHE_EXEC="/usr/bin/ccache"
     export CCACHE_DIR="${HOME}/.ccache_orangefox"
     mkdir -p "${CCACHE_DIR}"
     ccache -M 25G 2>/dev/null || true
-    info "Ccache configured at ${CCACHE_DIR} (Max size: 25G)."
-}
-
-# Configure OrangeFox Environment Variables
-configure_build_flags() {
-    info "Configuring OrangeFox build environment variables..."
 
     export ALLOW_MISSING_DEPENDENCIES=true
     export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
     export LC_ALL="C"
 
-    # OrangeFox Build Customization
+    # OrangeFox Metadata & Configuration
     export OF_MAINTAINER="${DEFAULT_MAINTAINER}"
     export FOX_VERSION="R12.1"
     export FOX_BUILD_TYPE="Unofficial"
     export TARGET_DEVICE="${DEVICE_CODENAME}"
-    
-    # Display dimensions (Redmi Note 12 Pro 4G: 1080x2400)
+
+    # Display Dimensions (Redmi Note 12 Pro 4G: 1080x2400)
     export OF_SCREEN_H=2400
     export OF_STATUS_H=95
     export OF_STATUS_INDENT_LEFT=48
     export OF_STATUS_INDENT_RIGHT=48
     export OF_CLOCK_POS=1
 
-    # Security & Decryption
+    # Storage Decryption (FBE v2 + Metadata Encryption)
     export TW_INCLUDE_CRYPTO=true
     export TW_INCLUDE_CRYPTO_FBE=true
     export TW_INCLUDE_FBE_METADATA_DECRYPT=true
@@ -307,35 +305,35 @@ configure_build_flags() {
     export FOX_USE_SPECIFIC_MAGISK_ZIP=1
 }
 
-# Compile OrangeFox Recovery
+# 6. Compilation
 compile_recovery() {
-    info "Initializing Android build environment..."
+    info "Sourcing Android build environment..."
     cd "${WORKSPACE_DIR}"
 
     # shellcheck source=/dev/null
     source build/envsetup.sh
 
-    info "Selecting lunch target: ${LUNCH_TARGET}..."
+    info "Executing lunch for target: ${LUNCH_TARGET}..."
     if ! lunch "${LUNCH_TARGET}"; then
-        warn "Target '${LUNCH_TARGET}' failed. Checking alternative lunch combos..."
+        warn "Target '${LUNCH_TARGET}' failed. Attempting alternative targets..."
         if lunch "fox_${DEVICE_CODENAME}-eng" 2>/dev/null; then
             LUNCH_TARGET="fox_${DEVICE_CODENAME}-eng"
         elif lunch "twrp_sweet-eng" 2>/dev/null; then
             LUNCH_TARGET="twrp_sweet-eng"
         else
-            die "Failed to lunch target for ${DEVICE_CODENAME}. Check your device tree AndroidProducts.mk."
+            die "Failed to lunch target for ${DEVICE_CODENAME}."
         fi
     fi
 
     if [[ "$RUN_CLEAN" == "true" ]]; then
-        info "Cleaning previous build output..."
+        info "Cleaning prior build output..."
         mka clean
     fi
 
     local start_time
     start_time=$(date +%s)
 
-    info "Starting OrangeFox compilation for ${DEVICE_CODENAME} (target: ${BUILD_TARGET}, threads: ${JOBS})..."
+    info "Starting OrangeFox compilation (target: ${BUILD_TARGET}, threads: ${JOBS})..."
     mka -j"${JOBS}" "${BUILD_TARGET}"
 
     local end_time
@@ -344,19 +342,19 @@ compile_recovery() {
     local minutes=$((duration / 60))
     local seconds=$((duration % 60))
 
-    success "Compilation finished successfully in ${minutes}m ${seconds}s!"
+    success "OrangeFox compilation finished successfully in ${minutes}m ${seconds}s!"
 }
 
-# Verify Build Output and Optionally Upload
+# 7. Verification and Pixeldrain Upload
 package_and_export() {
-    info "Verifying output artifacts..."
+    info "Verifying built output..."
     cd "${WORKSPACE_DIR}"
 
     local out_dir="out/target/product/${DEVICE_CODENAME}"
     [[ -d "$out_dir" ]] || out_dir="out/target/product/sweet"
 
     if [[ ! -d "$out_dir" ]]; then
-        die "Output directory not found. Build may have failed to produce output."
+        die "Output directory not found. Compilation may have aborted."
     fi
 
     local fox_zip
@@ -382,24 +380,13 @@ package_and_export() {
     echo "============================================================"
     echo ""
 
-    # Automatic Upload via Pixeldrain
     if [[ "$AUTO_UPLOAD" == "true" && -n "$fox_zip" && -f "$fox_zip" ]]; then
-        local uploader_script
-        uploader_script="$(dirname "$(readlink -f "$0")")/upload_to_pixeldrain.sh"
-        if [[ -x "$uploader_script" ]]; then
-            info "Uploading OrangeFox zip to Pixeldrain..."
-            "$uploader_script" "$fox_zip" || warn "Pixeldrain upload failed, but recovery build is intact."
-        elif command -v curl >/dev/null 2>&1; then
-            info "Uploading via inline Pixeldrain API..."
-            local fname
-            fname=$(basename "$fox_zip")
-            local resp
-            resp=$(curl -s -L --upload-file "$fox_zip" "https://pixeldrain.com/api/file/${fname}" 2>/dev/null || true)
-            local file_id
-            file_id=$(echo "$resp" | grep -oP '"id":\s*"\K[^"]+' || true)
-            if [[ -n "$file_id" ]]; then
-                success "Uploaded to Pixeldrain: https://pixeldrain.com/u/${file_id}"
-            fi
+        info "Uploading OrangeFox flashable package to Pixeldrain..."
+        local uploader_script="$(dirname "$(readlink -f "$0" 2>/dev/null || echo ".")")/upload_to_pixeldrain.sh"
+        if [[ -f "$uploader_script" ]]; then
+            bash "$uploader_script" "$fox_zip" || warn "Pixeldrain upload failed, but build artifact is saved locally."
+        else
+            curl -fsSL "https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/orangefox/upload_to_pixeldrain.sh" | bash -s -- "$fox_zip" || warn "Pixeldrain upload failed, but build artifact is saved locally."
         fi
     fi
 }
@@ -408,7 +395,7 @@ package_and_export() {
 main() {
     echo "============================================================"
     echo "  OrangeFox Recovery Project (OFRP) Builder for ${DEVICE_CODENAME} "
-    echo "  Version: ${SCRIPT_VERSION} | Base: fox_${FOX_BRANCH}              "
+    echo "  Version: ${SCRIPT_VERSION} | Manifest: fox_${FOX_BRANCH}          "
     echo "============================================================"
     echo ""
 
@@ -420,12 +407,12 @@ main() {
 
     sync_orangefox
     setup_device_tree
-    setup_ccache
-    configure_build_flags
+    setup_build_environment
     compile_recovery
     package_and_export
 
-    success "All tasks completed successfully!"
+    trap - EXIT
+    success "OrangeFox Recovery build and packaging completed successfully!"
 }
 
 main "$@"

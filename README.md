@@ -39,33 +39,31 @@ Building OrangeFox Recovery is significantly lighter than compiling a full Andro
 
 ## Quick Start (Building OrangeFox)
 
-Clone this repository inside your Linux home directory:
-
+### One-Line Build Command (Run inside Linux / WSL2 Terminal):
 ```bash
-# Clone the build scripts
+curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/orangefox/orangefox_local.sh | bash
+```
+
+### With Custom Options:
+```bash
+# Automatically install missing dependencies and run with 8 threads:
+curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/orangefox/orangefox_local.sh | bash -s -- --install-deps -j8
+
+# Force re-sync of the OrangeFox manifest:
+curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/orangefox/orangefox_local.sh | bash -s -- --sync
+
+# Compile without auto-uploading to Pixeldrain:
+curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/orangefox/orangefox_local.sh | bash -s -- --no-upload
+```
+
+---
+
+### Alternative: Clone Repository Locally
+```bash
 git clone https://github.com/rony1duet/build_scripts_sweet2.git -b orangefox ~/build_scripts_sweet2
 cd ~/build_scripts_sweet2
-chmod +x build_orangefox_sweet2.sh upload_to_pixeldrain.sh
-```
-
-### Build Command (Automatic Setup & Build):
-```bash
-./build_orangefox_sweet2.sh --install-deps
-```
-
-### Build with Custom Workspace or Options:
-```bash
-# Specify custom workspace and number of threads
-./build_orangefox_sweet2.sh -j8 ~/fox_12.1
-
-# Force re-sync of source manifest
-./build_orangefox_sweet2.sh --sync
-
-# Clean previous build artifacts before compiling
-./build_orangefox_sweet2.sh --clean
-
-# Build without uploading to Pixeldrain
-./build_orangefox_sweet2.sh --no-upload
+chmod +x orangefox_local.sh build_orangefox_sweet2.sh upload_to_pixeldrain.sh
+./orangefox_local.sh
 ```
 
 ---
