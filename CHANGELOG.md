@@ -67,6 +67,7 @@ Official release notes and comprehensive changelog for PixelOS Android 17 (`Pixe
 ---
 
 ### ⚙️ Build Infrastructure & Automation (`build_scripts_sweet2` & `manifest_sweet2`)
+- **OrangeFox Builder v1.8.2**: Neutralized hardcoded `runtime.GOMAXPROCS(runtime.NumCPU())` in Blueprint/Soong Go sources (`bootstrap/command.go`) by automatically scanning and enforcing `runtime.GOMAXPROCS(2)` at compile-time; enforced OS CPU affinity (`taskset -cp 0-1 $$`) and invalidated stale `soong_build` binaries to permanently prevent Go scheduler from scaling to 48 threads (`48 P`) and exhausting container memory.
 - **OrangeFox Builder v1.8.1**: Enforced single-threaded AST evaluation (`GOMAXPROCS=1`), aggressive garbage collection (`GOGC=10`), and Linux `MADV_DONTNEED` paging (`GODEBUG=gctrace=1,madvdontneed=1,asyncpreemptoff=1`) directly into `build/blueprint/bootstrap/bootstrap.go` and `out/soong/.bootstrap/build.ninja` via literal heredoc Python patcher; set finite 64MB stack limit (`ulimit -s 65536`) to protect modern 64-bit kernel memory layouts from OOM kills in zero-swap containers.
 - **Manifest Synchronization**: Local manifest updated to track `PixelOS-17-base` across all device trees with `clone-depth="1"` (`71a4274`, `8867344`).
 - **Modern Soong Stubs Enforcement**: Purged deprecated `WITHOUT_CHECK_API=true` and enforced `BUILD_FROM_SOURCE_STUB=true` to comply with Android 17 text stubs (`2fef4ff`).

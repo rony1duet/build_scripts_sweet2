@@ -15,7 +15,7 @@
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.8.1"
+readonly SCRIPT_VERSION="1.8.2"
 readonly RECOVERY_NAME="OrangeFox"
 readonly FOX_BRANCH="12.1"
 readonly SYNC_REPO_URL="https://gitlab.com/OrangeFox/sync.git"
@@ -368,19 +368,22 @@ patch_soong_memory() {
     info "Applying container memory & kernel concurrency safeguards to Soong bootstrap..."
     cd "${WORKSPACE_DIR}"
 
-    # 1. Clean up any stale wrapper binaries from previous attempts
+    # 1. Restrict CPU affinity of the current shell and subshells to cores 0 and 1
+    taskset -cp 0-1 $$ 2>/dev/null || true
+
+    # 2. Clean up any stale wrapper binaries from previous attempts
     if [[ -f "out/soong/.bootstrap/bin/soong_build.real" ]]; then
         info "Cleaning up stale soong_build.real..."
         rm -f "out/soong/.bootstrap/bin/soong_build.real"
     fi
 
-    # 2. Wrap prebuilt Go toolchain so all Go compilation uses single-thread, madvdontneed, & GC limits
+    # 3. Wrap prebuilt Go toolchain so all Go compilation uses 2-processor, madvdontneed, & GC limits
     local go_bin="prebuilts/go/linux-x86/bin/go"
     local go_real="prebuilts/go/linux-x86/bin/go.real"
     if [[ -f "$go_real" ]]; then
         cat << 'EOF' > "$go_bin"
 #!/usr/bin/env bash
-export GOMAXPROCS=1
+export GOMAXPROCS=2
 export GODEBUG="gctrace=1,madvdontneed=1,asyncpreemptoff=1"
 export GOGC=10
 export MALLOC_ARENA_MAX=2
@@ -392,7 +395,7 @@ EOF
         mv "$go_bin" "$go_real"
         cat << 'EOF' > "$go_bin"
 #!/usr/bin/env bash
-export GOMAXPROCS=1
+export GOMAXPROCS=2
 export GODEBUG="gctrace=1,madvdontneed=1,asyncpreemptoff=1"
 export GOGC=10
 export MALLOC_ARENA_MAX=2
@@ -401,11 +404,35 @@ EOF
         chmod +x "$go_bin"
     fi
 
-    # 3. Patch Blueprint bootstrap generator rule and build.ninja via dedicated Python helper
+    # 4. Patch Blueprint/Soong Go source files and Ninja rules via dedicated Python helper
     cat << 'PYEOF' > "${WORKSPACE_DIR}/patch_bootstrap_helper.py"
 import os, sys, re
 
-def patch_file(path):
+def patch_go_sources(base_dirs):
+    pattern = re.compile(r'runtime\.GOMAXPROCS\s*\(\s*(?:runtime\.NumCPU\s*\(\s*\)|[a-zA-Z_][a-zA-Z0-9_]*|[1-9][0-9]*)\s*\)')
+    patched = 0
+    for d in base_dirs:
+        if not os.path.isdir(d):
+            continue
+        for root, _, files in os.walk(d):
+            for f in files:
+                if f.endswith('.go'):
+                    fp = os.path.join(root, f)
+                    try:
+                        with open(fp, 'r', encoding='utf-8', errors='ignore') as pfile:
+                            c = pfile.read()
+                        if pattern.search(c):
+                            nc = pattern.sub('runtime.GOMAXPROCS(2)', c)
+                            if nc != c:
+                                with open(fp, 'w', encoding='utf-8') as pfile:
+                                    pfile.write(nc)
+                                print(f"[✓] Hardcoded runtime.GOMAXPROCS(2) in Go source: {fp}")
+                                patched += 1
+                    except Exception:
+                        pass
+    return patched
+
+def patch_ninja_rule(path):
     if not os.path.isfile(path):
         return
     with open(path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -413,7 +440,7 @@ def patch_file(path):
 
     def repl_fn(m):
         p = m.group(1)
-        return f'env -i GOMAXPROCS=1 GODEBUG=gctrace=1,madvdontneed=1,asyncpreemptoff=1 GOGC=10 MALLOC_ARENA_MAX=2 TMPDIR=/tmp TOP="{p}TOP" ANDROID_BUILD_TOP="{p}TOP" "{p}BUILDER"'
+        return f'env -i GOMAXPROCS=2 GODEBUG=gctrace=1,madvdontneed=1,asyncpreemptoff=1 GOGC=10 MALLOC_ARENA_MAX=2 TMPDIR=/tmp TOP="{p}TOP" ANDROID_BUILD_TOP="{p}TOP" "{p}BUILDER"'
 
     pat = re.compile(r'env -i\s+.*?"(\${1,2})BUILDER"')
     new_content = pat.sub(repl_fn, content)
@@ -423,13 +450,23 @@ def patch_file(path):
     if new_content != content:
         with open(path, 'w', encoding='utf-8') as f:
             f.write(new_content)
-        print(f"[✓] Successfully patched {path} for single-thread / GOGC=10 memory safety.")
+        print(f"[✓] Successfully patched {path} for 2-processor / GOGC=10 memory safety.")
     else:
         print(f"[✓] {path} already carries container memory safeguards.")
 
 if __name__ == '__main__':
+    # 1. Patch Go source files in build/blueprint and build/soong
+    patched_count = patch_go_sources(["build/blueprint", "build/soong"])
+    if patched_count > 0:
+        # Invalidate soong_build binary cache so Ninja recompiles with the patched sources
+        sb_bin = "out/soong/.bootstrap/bin/soong_build"
+        if os.path.isfile(sb_bin):
+            os.remove(sb_bin)
+            print(f"[✓] Purged stale {sb_bin} to force recompilation with GOMAXPROCS(2).")
+
+    # 2. Patch bootstrap.go and build.ninja
     for target in sys.argv[1:]:
-        patch_file(target)
+        patch_ninja_rule(target)
 PYEOF
 
     local bp_file="build/blueprint/bootstrap/bootstrap.go"
@@ -473,9 +510,10 @@ setup_build_environment() {
     # OS limits for heavy compilation (64MB stack avoids Linux kernel mmap layout regression)
     ulimit -s 65536 2>/dev/null || true
     ulimit -n 65535 2>/dev/null || true
+    taskset -cp 0-1 $$ 2>/dev/null || true
 
     # Memory & Concurrency Safeguards for Soong & Compiler
-    export GOMAXPROCS=1
+    export GOMAXPROCS=2
     export GODEBUG="gctrace=1,madvdontneed=1,asyncpreemptoff=1"
     export GOGC=10
     export MALLOC_ARENA_MAX=2
