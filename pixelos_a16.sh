@@ -108,6 +108,11 @@ sanitize_configs() {
         rm -rf kernel/xiaomi/sm6150/KernelSU kernel/xiaomi/sm6150/drivers/kernelsu
         git -C kernel/xiaomi/sm6150 checkout HEAD -- drivers/kernelsu drivers/Makefile drivers/Kconfig fs/ 2>/dev/null || true
     fi
+
+    # Fix GoogleCameraEng check_prebuilt_presigned_apk failure (contains compressed dex files and is privileged)
+    if [[ -f "vendor/GCam_sweet2/Android.bp" ]] && ! grep -q "skip_preprocessed_apk_checks" vendor/GCam_sweet2/Android.bp; then
+        sed -i '/preprocessed: true,/a \    skip_preprocessed_apk_checks: true,' vendor/GCam_sweet2/Android.bp
+    fi
 }
 
 cleanup_storage() {
@@ -143,6 +148,7 @@ setup_environment() {
     export DONT_INSTALL_DEXPREOPT_TESTS=true
     export SKIP_BOOT_JARS_CHECK=true
     export WITHOUT_CHECK_API=true
+    export DONT_UNCOMPRESS_PRIV_APPS_DEXS=true
 
     export GOGC=40
     export GOMEMLIMIT="14GiB"
@@ -160,6 +166,14 @@ setup_gcam() {
     fi
 
     [[ -f "vendor/GCam_sweet2/system/product/app/GoogleCameraEng/GoogleCameraEng.apk" ]] || die "GoogleCameraEng.apk not found"
+
+    # Invalidate stale GCam prebuilt check stamps so Soong re-evaluates check_prebuilt_presigned_apk
+    rm -rf out/soong/.intermediates/vendor/GCam_sweet2 2>/dev/null || true
+
+    # Ensure GCam Android.bp skips preprocessed compressed dex validation for presigned APK
+    if [[ -f "vendor/GCam_sweet2/Android.bp" ]] && ! grep -q "skip_preprocessed_apk_checks" vendor/GCam_sweet2/Android.bp; then
+        sed -i '/preprocessed: true,/a \    skip_preprocessed_apk_checks: true,' vendor/GCam_sweet2/Android.bp
+    fi
 }
 
 build_target() {
