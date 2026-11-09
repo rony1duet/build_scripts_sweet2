@@ -15,7 +15,7 @@
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.5.1"
+readonly SCRIPT_VERSION="1.6.0"
 readonly RECOVERY_NAME="OrangeFox"
 readonly FOX_BRANCH="12.1"
 readonly SYNC_REPO_URL="https://gitlab.com/OrangeFox/sync.git"
@@ -43,7 +43,16 @@ DEVICE_TREE_URL="${DEVICE_TREE_URL:-https://github.com/MiDoNaSR545/device_xiaomi
 DEVICE_TREE_BRANCH="${DEVICE_TREE_BRANCH:-fox-12.1}"
 LUNCH_TARGET="twrp_${DEVICE_CODENAME}-eng"
 BUILD_TARGET="recoveryimage"
-JOBS="$(nproc --all 2>/dev/null || echo 4)"
+# Parallelism safeguards:
+# OrangeFox recovery image is lightweight (~300 source targets).
+# Uncapped 48 threads on containers spikes RAM & arenas, triggering soong_build OOM kills.
+CUSTOM_JOBS=""
+DETECTED_CORES="$(nproc --all 2>/dev/null || echo 4)"
+if [[ "$DETECTED_CORES" -gt 8 ]]; then
+    JOBS=8
+else
+    JOBS="$DETECTED_CORES"
+fi
 INSTALL_DEPS=false
 FORCE_SYNC=false
 RUN_CLEAN=false
@@ -63,6 +72,11 @@ for arg in "$@"; do
             ;;
         -j=*|--jobs=*)
             JOBS="${arg#*=}"
+            CUSTOM_JOBS="${arg#*=}"
+            ;;
+        -j*)
+            JOBS="${arg#-j}"
+            CUSTOM_JOBS="${arg#-j}"
             ;;
         --tree=*)
             DEVICE_TREE_URL="${arg#*=}"
@@ -146,18 +160,18 @@ check_environment() {
     local total_ram_mb total_swap_mb
     total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
     total_swap_mb=$(free -m | awk '/^Swap:/{print $2}')
-    info "Host RAM: ${total_ram_mb} MB | Swap: ${total_swap_mb} MB"
+    info "Host RAM: ${total_ram_mb} MB | Swap: ${total_swap_mb} MB (Build threads capped to: ${JOBS})"
 
-    if [[ "$total_ram_mb" -lt 12000 && "$total_swap_mb" -lt 8000 ]]; then
-        warn "Low RAM + Swap detected (${total_ram_mb} MB RAM / ${total_swap_mb} MB Swap)."
+    if [[ "$total_swap_mb" -lt 4000 ]]; then
         if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-            info "Automatically configuring 16 GB swap file to prevent OOM errors..."
-            sudo fallocate -l 16G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=16384 2>/dev/null || true
+            info "Zero/low swap space detected. Attempting to activate 8 GB swapfile..."
+            if [[ ! -f /swapfile ]]; then
+                sudo fallocate -l 8G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192 2>/dev/null || true
+            fi
             if [[ -f /swapfile ]]; then
-                sudo chmod 600 /swapfile
+                sudo chmod 600 /swapfile 2>/dev/null || true
                 sudo mkswap /swapfile 2>/dev/null || true
-                sudo swapon /swapfile 2>/dev/null || true
-                success "16 GB swap file successfully activated."
+                sudo swapon /swapfile 2>/dev/null && success "8 GB swap file successfully activated." || warn "Could not activate swap (container restricted). Memory limits enabled."
             fi
         fi
     fi
@@ -358,6 +372,13 @@ setup_build_environment() {
     export FOX_TARGET_DEVICES="${DEVICE_ALIAS},${DEVICE_CODENAME},sweet"
     export TARGET_DEVICE_ALT="${DEVICE_ALIAS},${DEVICE_CODENAME},sweet"
 
+    # Memory & Concurrency Safeguards for Soong & Compiler
+    export GOMAXPROCS="${JOBS}"
+    export GOMEMLIMIT=12GiB
+    export GOGC=40
+    export MALLOC_ARENA_MAX=2
+    export NINJA_ARGS="-j${JOBS}"
+
     # Display Dimensions (Redmi Note 12 Pro 4G: 1080x2400)
     export OF_SCREEN_H=2400
     export OF_STATUS_H=100
@@ -389,6 +410,12 @@ setup_build_environment() {
 compile_recovery() {
     info "Sourcing Android build environment..."
     cd "${WORKSPACE_DIR}"
+
+    # Clean up incomplete/corrupted Soong bootstrap cache from previous OOM kill
+    if [[ -d "${WORKSPACE_DIR}/out/soong" && ! -f "${WORKSPACE_DIR}/out/soong/build.ninja" ]]; then
+        warn "Cleaning incomplete/corrupted Soong bootstrap cache from prior interrupted run..."
+        rm -rf "${WORKSPACE_DIR}/out/soong" "${WORKSPACE_DIR}/out/.module_paths"
+    fi
 
     # Envsetup and vendorsetup scripts contain subshells, grep checks, and tests
     # that return non-zero exit codes. Disable -e during envsetup and lunch.
@@ -423,14 +450,22 @@ compile_recovery() {
 
     if [[ "$RUN_CLEAN" == "true" ]]; then
         info "Cleaning prior build output..."
-        mka clean
+        if type m &>/dev/null; then
+            m clean
+        else
+            make clean
+        fi
     fi
 
     local start_time
     start_time=$(date +%s)
 
     info "Starting OrangeFox compilation (target: ${BUILD_TARGET}, threads: ${JOBS})..."
-    mka -j"${JOBS}" "${BUILD_TARGET}"
+    if type m &>/dev/null; then
+        m -j"${JOBS}" "${BUILD_TARGET}"
+    else
+        make -j"${JOBS}" "${BUILD_TARGET}"
+    fi
 
     local end_time
     end_time=$(date +%s)
