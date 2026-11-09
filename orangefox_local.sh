@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# OrangeFox Recovery Project (OFRP) Automated Local Build Script for Redmi Note 12 Pro 4G (sweet2)
-# Base: fox_12.1 (Android 12.1 / TWRP 12.1 minimal manifest)
+# OrangeFox Recovery Project (OFRP) Automated Local Build Script for Redmi Note 12 Pro 4G (sweet2 / sweet_k6a)
+# Target Base: fox_12.1 (Android 12.1 / TWRP 12.1 minimal manifest)
 # Maintainer: rony1duet
 # Supported OS: Linux (Ubuntu 20.04/22.04 LTS, Debian 11/12, WSL2)
 #
@@ -9,16 +9,17 @@
 #   curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/orangefox/orangefox_local.sh | bash
 #
 # Or with options:
-#   curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/orangefox/orangefox_local.sh | bash -s -- --install-deps
+#   curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/orangefox/orangefox_local.sh | bash -s -- --install-deps -j8
 #
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.1.0"
+readonly SCRIPT_VERSION="1.2.0"
 readonly RECOVERY_NAME="OrangeFox"
 readonly FOX_BRANCH="12.1"
 readonly MANIFEST_URL="https://gitlab.com/OrangeFox/manifest.git"
-readonly DEVICE_CODENAME="sweet2"
+readonly DEVICE_CODENAME="sweet_k6a"
+readonly DEVICE_ALIAS="sweet2"
 readonly DEVICE_BRAND="xiaomi"
 readonly DEFAULT_MAINTAINER="rony1duet"
 
@@ -36,8 +37,9 @@ else
     WORKSPACE_DIR="$(pwd)/fox_12.1"
 fi
 
-DEVICE_TREE_URL="${DEVICE_TREE_URL:-https://github.com/basamaryan/android_device_xiaomi_sweet-TWRP.git}"
-DEVICE_TREE_BRANCH="${DEVICE_TREE_BRANCH:-fox_12.1}"
+# Recommended device tree specifically authored for sweet_k6a / sweet2 (Redmi Note 12 Pro 4G)
+DEVICE_TREE_URL="${DEVICE_TREE_URL:-https://github.com/MiDoNaSR545/device_xiaomi_sweet_k6a-OFOX.git}"
+DEVICE_TREE_BRANCH="${DEVICE_TREE_BRANCH:-fox-12.1}"
 LUNCH_TARGET="twrp_${DEVICE_CODENAME}-eng"
 BUILD_TARGET="recoveryimage"
 JOBS="$(nproc --all 2>/dev/null || echo 4)"
@@ -67,12 +69,15 @@ for arg in "$@"; do
         --tree-branch=*)
             DEVICE_TREE_BRANCH="${arg#*=}"
             ;;
+        --lunch=*)
+            LUNCH_TARGET="${arg#*=}"
+            ;;
         --no-upload)
             AUTO_UPLOAD=false
             ;;
         -h|--help)
             cat << EOF
-OrangeFox Recovery Project (OFRP) Builder for ${DEVICE_CODENAME}
+OrangeFox Recovery Project (OFRP) Builder for ${DEVICE_ALIAS} / ${DEVICE_CODENAME}
 Version: ${SCRIPT_VERSION}
 
 Usage: curl -fsSL https://raw.githubusercontent.com/rony1duet/build_scripts_sweet2/orangefox/orangefox_local.sh | bash -s -- [options] [workspace_dir]
@@ -84,6 +89,7 @@ Options:
   -j, --jobs=<N>           Number of parallel build threads (default: ${JOBS})
   --tree=<url>             Git repository URL for device recovery tree
   --tree-branch=<branch>   Branch for device recovery tree (default: ${DEVICE_TREE_BRANCH})
+  --lunch=<target>         Custom lunch target (default: ${LUNCH_TARGET})
   --no-upload              Skip automatic upload to Pixeldrain
   -h, --help               Display this help text and exit
 EOF
@@ -229,10 +235,11 @@ sync_orangefox() {
 
 # 4. Device Recovery Tree Setup
 setup_device_tree() {
-    info "Setting up recovery device tree for ${DEVICE_CODENAME}..."
+    info "Setting up recovery device tree for ${DEVICE_ALIAS} (${DEVICE_CODENAME})..."
     cd "${WORKSPACE_DIR}"
 
     local target_dir="device/${DEVICE_BRAND}/${DEVICE_CODENAME}"
+    local alias_dir="device/${DEVICE_BRAND}/${DEVICE_ALIAS}"
 
     if [[ -d "${target_dir}/.git" ]]; then
         info "Device tree already present in ${target_dir}. Updating latest commits..."
@@ -247,23 +254,37 @@ setup_device_tree() {
         git clone "${DEVICE_TREE_URL}" -b "${DEVICE_TREE_BRANCH}" "${target_dir}"
     fi
 
-    # Alias sweet to sweet2 if needed
-    if [[ ! -f "${target_dir}/twrp_${DEVICE_CODENAME}.mk" && ! -f "${target_dir}/fox_${DEVICE_CODENAME}.mk" ]]; then
-        if [[ -f "${target_dir}/twrp_sweet.mk" ]]; then
-            info "Aliasing twrp_sweet.mk -> twrp_${DEVICE_CODENAME}.mk for ${DEVICE_CODENAME}..."
-            sed -e "s/sweet/sweet2/g" -e "s/Redmi Note 10 Pro/Redmi Note 12 Pro 4G/g" \
-                "${target_dir}/twrp_sweet.mk" > "${target_dir}/twrp_${DEVICE_CODENAME}.mk"
-        fi
+    # Create sweet2 symlink so both device/xiaomi/sweet_k6a and device/xiaomi/sweet2 resolve
+    if [[ ! -e "${alias_dir}" ]]; then
+        info "Creating alias symlink: ${alias_dir} -> ${DEVICE_CODENAME}..."
+        ln -sf "${DEVICE_CODENAME}" "${alias_dir}"
     fi
 
+    # Ensure sweet2 target makefile exists alongside sweet_k6a
+    if [[ -f "${target_dir}/twrp_${DEVICE_CODENAME}.mk" && ! -f "${target_dir}/twrp_${DEVICE_ALIAS}.mk" ]]; then
+        info "Creating alias makefile: twrp_${DEVICE_ALIAS}.mk..."
+        sed -e "s/${DEVICE_CODENAME}/${DEVICE_ALIAS}/g" \
+            "${target_dir}/twrp_${DEVICE_CODENAME}.mk" > "${target_dir}/twrp_${DEVICE_ALIAS}.mk"
+    fi
+
+    # Register twrp_sweet2 in AndroidProducts.mk if not already present
     if [[ -f "${target_dir}/AndroidProducts.mk" ]]; then
-        if ! grep -q "twrp_${DEVICE_CODENAME}.mk" "${target_dir}/AndroidProducts.mk"; then
-            sed -i "/PRODUCT_MAKEFILES/a \    \$(LOCAL_DIR)/twrp_${DEVICE_CODENAME}.mk \\\\" "${target_dir}/AndroidProducts.mk" || true
-            sed -i "/COMMON_LUNCH_CHOICES/a \    twrp_${DEVICE_CODENAME}-eng \\\\" "${target_dir}/AndroidProducts.mk" || true
+        if ! grep -q "twrp_${DEVICE_ALIAS}.mk" "${target_dir}/AndroidProducts.mk"; then
+            sed -i "/PRODUCT_MAKEFILES/a \    \$(LOCAL_DIR)/twrp_${DEVICE_ALIAS}.mk \\\\" "${target_dir}/AndroidProducts.mk" || true
+            sed -i "/COMMON_LUNCH_CHOICES/a \    twrp_${DEVICE_ALIAS}-eng \\\\" "${target_dir}/AndroidProducts.mk" || true
         fi
     fi
 
-    success "Device tree configured in ${target_dir}."
+    # Ensure device.mk asserts sweet2, sweet_k6a, and sweet
+    if [[ -f "${target_dir}/device.mk" ]]; then
+        if ! grep -q "TARGET_OTA_ASSERT_DEVICE" "${target_dir}/device.mk"; then
+            echo "" >> "${target_dir}/device.mk"
+            echo "# OTA Assert Devices" >> "${target_dir}/device.mk"
+            echo "TARGET_OTA_ASSERT_DEVICE := ${DEVICE_ALIAS},${DEVICE_CODENAME},sweet" >> "${target_dir}/device.mk"
+        fi
+    fi
+
+    success "Device tree configured in ${target_dir} (aliased to ${alias_dir})."
 }
 
 # 5. Ccache & Environment Setup
@@ -280,17 +301,20 @@ setup_build_environment() {
     export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
     export LC_ALL="C"
 
-    # OrangeFox Metadata & Configuration
-    export OF_MAINTAINER="${DEFAULT_MAINTAINER}"
+    # OrangeFox Metadata & Customization
+    export OF_MAINTAINER="${OF_MAINTAINER:-${DEFAULT_MAINTAINER}}"
     export FOX_VERSION="R12.1"
     export FOX_BUILD_TYPE="Unofficial"
     export TARGET_DEVICE="${DEVICE_CODENAME}"
+    export FOX_TARGET_DEVICES="${DEVICE_ALIAS},${DEVICE_CODENAME},sweet"
+    export TARGET_DEVICE_ALT="${DEVICE_ALIAS},${DEVICE_CODENAME},sweet"
 
     # Display Dimensions (Redmi Note 12 Pro 4G: 1080x2400)
     export OF_SCREEN_H=2400
-    export OF_STATUS_H=95
+    export OF_STATUS_H=100
     export OF_STATUS_INDENT_LEFT=48
     export OF_STATUS_INDENT_RIGHT=48
+    export OF_HIDE_NOTCH=1
     export OF_CLOCK_POS=1
 
     # Storage Decryption (FBE v2 + Metadata Encryption)
@@ -298,11 +322,16 @@ setup_build_environment() {
     export TW_INCLUDE_CRYPTO_FBE=true
     export TW_INCLUDE_FBE_METADATA_DECRYPT=true
     export BOARD_USES_METADATA_PARTITION=true
+    export BOARD_USES_QCOM_FBE_DECRYPTION=true
+
+    # Display wake fix for 120Hz AMOLED
+    export TW_NO_SCREEN_BLANK=true
+    export TW_NO_SCREEN_TIMEOUT=true
 
     # OrangeFox UI & Addons
     export OF_USE_GREEN_LED=0
     export FOX_ENABLE_APP_MANAGER=1
-    export FOX_USE_SPECIFIC_MAGISK_ZIP=1
+    export FOX_USE_SPECIFIC_MAGISK_ZIP="${WORKSPACE_DIR}/device/${DEVICE_BRAND}/${DEVICE_CODENAME}/addon/Magisk-v27.0.zip"
 }
 
 # 6. Compilation
@@ -315,13 +344,15 @@ compile_recovery() {
 
     info "Executing lunch for target: ${LUNCH_TARGET}..."
     if ! lunch "${LUNCH_TARGET}"; then
-        warn "Target '${LUNCH_TARGET}' failed. Attempting alternative targets..."
-        if lunch "fox_${DEVICE_CODENAME}-eng" 2>/dev/null; then
+        warn "Target '${LUNCH_TARGET}' failed. Checking alternative lunch targets..."
+        if lunch "twrp_${DEVICE_ALIAS}-eng" 2>/dev/null; then
+            LUNCH_TARGET="twrp_${DEVICE_ALIAS}-eng"
+        elif lunch "fox_${DEVICE_CODENAME}-eng" 2>/dev/null; then
             LUNCH_TARGET="fox_${DEVICE_CODENAME}-eng"
         elif lunch "twrp_sweet-eng" 2>/dev/null; then
             LUNCH_TARGET="twrp_sweet-eng"
         else
-            die "Failed to lunch target for ${DEVICE_CODENAME}."
+            die "Failed to lunch any recovery target for ${DEVICE_CODENAME} / ${DEVICE_ALIAS}."
         fi
     fi
 
@@ -350,11 +381,16 @@ package_and_export() {
     info "Verifying built output..."
     cd "${WORKSPACE_DIR}"
 
-    local out_dir="out/target/product/${DEVICE_CODENAME}"
-    [[ -d "$out_dir" ]] || out_dir="out/target/product/sweet"
+    local out_dir=""
+    for d in "out/target/product/${DEVICE_CODENAME}" "out/target/product/${DEVICE_ALIAS}" "out/target/product/sweet"; do
+        if [[ -d "$d" ]]; then
+            out_dir="$d"
+            break
+        fi
+    done
 
-    if [[ ! -d "$out_dir" ]]; then
-        die "Output directory not found. Compilation may have aborted."
+    if [[ -z "$out_dir" || ! -d "$out_dir" ]]; then
+        die "Output directory not found. Compilation may have failed to produce output."
     fi
 
     local fox_zip
@@ -394,8 +430,8 @@ package_and_export() {
 # Main Execution Flow
 main() {
     echo "============================================================"
-    echo "  OrangeFox Recovery Project (OFRP) Builder for ${DEVICE_CODENAME} "
-    echo "  Version: ${SCRIPT_VERSION} | Manifest: fox_${FOX_BRANCH}          "
+    echo "  OrangeFox Recovery Project (OFRP) Builder for ${DEVICE_ALIAS} (${DEVICE_CODENAME})"
+    echo "  Version: ${SCRIPT_VERSION} | Base: fox_${FOX_BRANCH}              "
     echo "============================================================"
     echo ""
 
