@@ -15,7 +15,7 @@
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.5.0"
+readonly SCRIPT_VERSION="1.5.1"
 readonly RECOVERY_NAME="OrangeFox"
 readonly FOX_BRANCH="12.1"
 readonly SYNC_REPO_URL="https://gitlab.com/OrangeFox/sync.git"
@@ -278,6 +278,12 @@ setup_device_tree() {
     local target_dir="device/${DEVICE_BRAND}/${DEVICE_CODENAME}"
     local alias_dir="device/${DEVICE_BRAND}/${DEVICE_ALIAS}"
 
+    # Remove any existing alias symlink/dir to prevent duplicate vendorsetup inclusion and Soong/Kati collisions
+    if [[ -e "${alias_dir}" || -L "${alias_dir}" ]]; then
+        info "Cleaning up old alias symlink/dir: ${alias_dir}..."
+        rm -rf "${alias_dir}"
+    fi
+
     if [[ -d "${target_dir}/.git" ]]; then
         info "Device tree already present in ${target_dir}. Updating latest commits..."
         git -C "${target_dir}" fetch origin "${DEVICE_TREE_BRANCH}" || true
@@ -291,26 +297,30 @@ setup_device_tree() {
         git clone "${DEVICE_TREE_URL}" -b "${DEVICE_TREE_BRANCH}" "${target_dir}"
     fi
 
-    # Create sweet2 symlink so both device/xiaomi/sweet_k6a and device/xiaomi/sweet2 resolve
-    if [[ ! -e "${alias_dir}" ]]; then
-        info "Creating alias symlink: ${alias_dir} -> ${DEVICE_CODENAME}..."
-        ln -sf "${DEVICE_CODENAME}" "${alias_dir}"
-    fi
+    # Ensure sweet2 alias target makefile exists cleanly without path corruption
+    info "Configuring alias makefile: ${target_dir}/twrp_${DEVICE_ALIAS}.mk..."
+    cat << EOF > "${target_dir}/twrp_${DEVICE_ALIAS}.mk"
+#
+# Copyright (C) $(date +%Y) The Android Open Source Project
+# Inherit sweet_k6a base configuration
+\$(call inherit-product, device/${DEVICE_BRAND}/${DEVICE_CODENAME}/twrp_${DEVICE_CODENAME}.mk)
 
-    # Ensure sweet2 target makefile exists alongside sweet_k6a
-    if [[ -f "${target_dir}/twrp_${DEVICE_CODENAME}.mk" && ! -f "${target_dir}/twrp_${DEVICE_ALIAS}.mk" ]]; then
-        info "Creating alias makefile: twrp_${DEVICE_ALIAS}.mk..."
-        sed -e "s/${DEVICE_CODENAME}/${DEVICE_ALIAS}/g" \
-            "${target_dir}/twrp_${DEVICE_CODENAME}.mk" > "${target_dir}/twrp_${DEVICE_ALIAS}.mk"
-    fi
+PRODUCT_NAME := twrp_${DEVICE_ALIAS}
+PRODUCT_DEVICE := ${DEVICE_CODENAME}
+PRODUCT_MODEL := Redmi Note 12 Pro 4G
+EOF
 
-    # Register twrp_sweet2 in AndroidProducts.mk if not already present
-    if [[ -f "${target_dir}/AndroidProducts.mk" ]]; then
-        if ! grep -q "twrp_${DEVICE_ALIAS}.mk" "${target_dir}/AndroidProducts.mk"; then
-            sed -i "/PRODUCT_MAKEFILES/a \    \$(LOCAL_DIR)/twrp_${DEVICE_ALIAS}.mk \\\\" "${target_dir}/AndroidProducts.mk" || true
-            sed -i "/COMMON_LUNCH_CHOICES/a \    twrp_${DEVICE_ALIAS}-eng \\\\" "${target_dir}/AndroidProducts.mk" || true
-        fi
-    fi
+    # Configure AndroidProducts.mk with both targets cleanly
+    info "Configuring lunch targets in ${target_dir}/AndroidProducts.mk..."
+    cat << EOF > "${target_dir}/AndroidProducts.mk"
+PRODUCT_MAKEFILES := \\
+    \$(LOCAL_DIR)/twrp_${DEVICE_CODENAME}.mk \\
+    \$(LOCAL_DIR)/twrp_${DEVICE_ALIAS}.mk
+
+COMMON_LUNCH_CHOICES := \\
+    twrp_${DEVICE_CODENAME}-eng \\
+    twrp_${DEVICE_ALIAS}-eng
+EOF
 
     # Ensure device.mk asserts sweet2, sweet_k6a, and sweet
     if [[ -f "${target_dir}/device.mk" ]]; then
@@ -321,7 +331,7 @@ setup_device_tree() {
         fi
     fi
 
-    success "MiDoNaSR545 device tree configured in ${target_dir} (aliased to ${alias_dir})."
+    success "MiDoNaSR545 device tree configured in ${target_dir}."
 }
 
 # 5. Ccache & Environment Setup
@@ -343,6 +353,8 @@ setup_build_environment() {
     export FOX_VERSION="R12.1"
     export FOX_BUILD_TYPE="Unofficial"
     export TARGET_DEVICE="${DEVICE_CODENAME}"
+    export FOX_BUILD_DEVICE="${DEVICE_CODENAME}"
+    export FDEVICE="${DEVICE_CODENAME}"
     export FOX_TARGET_DEVICES="${DEVICE_ALIAS},${DEVICE_CODENAME},sweet"
     export TARGET_DEVICE_ALT="${DEVICE_ALIAS},${DEVICE_CODENAME},sweet"
 
@@ -378,21 +390,35 @@ compile_recovery() {
     info "Sourcing Android build environment..."
     cd "${WORKSPACE_DIR}"
 
+    # Envsetup and vendorsetup scripts contain subshells, grep checks, and tests
+    # that return non-zero exit codes. Disable -e during envsetup and lunch.
+    set +e
     # shellcheck source=/dev/null
     source build/envsetup.sh
 
     info "Executing lunch for target: ${LUNCH_TARGET}..."
-    if ! lunch "${LUNCH_TARGET}"; then
+    lunch "${LUNCH_TARGET}"
+    local lunch_rc=$?
+
+    if [[ $lunch_rc -ne 0 ]]; then
         warn "Target '${LUNCH_TARGET}' failed. Checking alternative lunch targets..."
-        if lunch "twrp_${DEVICE_ALIAS}-eng" 2>/dev/null; then
+        if lunch "twrp_${DEVICE_ALIAS}-eng"; then
             LUNCH_TARGET="twrp_${DEVICE_ALIAS}-eng"
-        elif lunch "fox_${DEVICE_CODENAME}-eng" 2>/dev/null; then
+            lunch_rc=0
+        elif lunch "fox_${DEVICE_CODENAME}-eng"; then
             LUNCH_TARGET="fox_${DEVICE_CODENAME}-eng"
-        elif lunch "twrp_sweet-eng" 2>/dev/null; then
+            lunch_rc=0
+        elif lunch "twrp_sweet-eng"; then
             LUNCH_TARGET="twrp_sweet-eng"
-        else
-            die "Failed to lunch any recovery target for ${DEVICE_CODENAME} / ${DEVICE_ALIAS}."
+            lunch_rc=0
         fi
+    fi
+
+    # Re-enable errexit for compilation
+    set -e
+
+    if [[ $lunch_rc -ne 0 ]]; then
+        die "Failed to lunch any recovery target for ${DEVICE_CODENAME} / ${DEVICE_ALIAS}."
     fi
 
     if [[ "$RUN_CLEAN" == "true" ]]; then
