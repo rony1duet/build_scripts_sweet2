@@ -134,7 +134,10 @@ cleanup_storage() {
         out/target/product/${DEVICE_CODENAME}/etc/vintf \
         out/target/product/${DEVICE_CODENAME}/system/etc/vintf \
         out/soong/.intermediates/vendor/GCam_sweet2 \
-        out/target/product/${DEVICE_CODENAME}/product/app/GoogleCameraEng 2>/dev/null || true
+        out/target/product/${DEVICE_CODENAME}/product/app/GoogleCameraEng \
+        out/soong/.bootstrap \
+        out/soong/build.*.ninja \
+        out/soong/soong.*.variables 2>/dev/null || true
 
     find . -type d -name "objects" -path "*/.git/lfs/objects" -exec rm -rf {} + 2>/dev/null || true
 }
@@ -147,7 +150,7 @@ setup_environment() {
     export BUILD_BROKEN_MISSING_REQUIRED_MODULES=true
     export DONT_INSTALL_DEXPREOPT_TESTS=true
     export SKIP_BOOT_JARS_CHECK=true
-    export WITHOUT_CHECK_API=true
+    unset WITHOUT_CHECK_API
     export DONT_UNCOMPRESS_PRIV_APPS_DEXS=true
 
     export GOGC=40

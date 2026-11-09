@@ -8,7 +8,7 @@
 
 set -eo pipefail
 
-readonly SCRIPT_VERSION="1.3.5"
+readonly SCRIPT_VERSION="1.3.6"
 readonly ROM_NAME="PixelOS"
 readonly ROM_MANIFEST_URL="https://github.com/PixelOS-AOSP/android_manifest.git"
 readonly ROM_MANIFEST_BRANCH="sixteen-qpr2"
@@ -520,7 +520,7 @@ setup_environment() {
     export BUILD_BROKEN_MISSING_REQUIRED_MODULES=true
     export DONT_INSTALL_DEXPREOPT_TESTS=true
     export SKIP_BOOT_JARS_CHECK=true
-    export WITHOUT_CHECK_API=true
+    unset WITHOUT_CHECK_API
     export DONT_UNCOMPRESS_PRIV_APPS_DEXS=true
     export TARGET_RELEASE="${TARGET_RELEASE:-trunk_staging}"
 
